@@ -6,13 +6,13 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from dotenv import load_dotenv
 
-load_dotenv()
+# Настройки прямо в коде (замените на свои актуальные данные)
+TELEGRAM_BOT_TOKEN = "9041502480:AAFePnu1ZB51BtIfp2FctGvuUMV_EslCB50"
+XF_URL = "https://whg128846.samp.date/"
+XF_API_KEY = "9GsxRycwYufhdiEP6gYHuNROQpT3ErYk" 
+PORT = int(os.getenv("PORT", 10000))
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-XF_URL = os.getenv("XF_URL")
-XF_API_KEY = os.getenv("XF_API_KEY")
-
-bot = Bot(token=TOKEN)
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
 
 # --- Health-check сервер для Render / BetterUptime ---
@@ -24,15 +24,14 @@ async def start_web_server():
     app.router.add_get("/", health_check)
     runner = web.AppRunner(app)
     await runner.setup()
-    port = int(os.getenv("PORT", 10000))
-    site = web.TCPSite(runner, "0.0.0.0", port)
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
 
 # --- Хендлеры бота ---
 @dp.message(F.text.startswith("/start"))
 async def cmd_start(message: Message):
     await message.answer(
-        "👋 Здравствуйте! Это официальный бот проекта [b]VISE RUSSIA | MOSCOW[/b].\n\n"
+        "👋 Здравствуйте! Это официальный бот проекта <b>VISE RUSSIA | MOSCOW</b>.\n\n"
         "Доступные команды:\n"
         "/punish <ник> — Проверить варны и баны игрока на форуме",
         parse_mode="HTML"
@@ -42,7 +41,7 @@ async def cmd_start(message: Message):
 async def cmd_punish(message: Message):
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
-        await message.answer("⚠️ Укажите ник игрока: `/punish <ник>`", parse_mode="Markdown")
+        await message.answer("⚠️ Укажите ник игрока: <code>/punish &lt;ник&gt;</code>", parse_mode="HTML")
         return
     
     username = args[1]
@@ -70,7 +69,7 @@ async def cmd_punish(message: Message):
                     profile = user_data.get("full", {})
                     
                     is_banned = profile.get("is_banned", False)
-                    ban_status = "🔴 Забанен" "Активен" if is_banned else "🟢 Не забанен"
+                    ban_status = "🔴 Забанен" if is_banned else "🟢 Не забанен"
 
                     text = (
                         f"📋 <b>Информация об игроке: {username}</b>\n\n"
@@ -84,9 +83,7 @@ async def cmd_punish(message: Message):
 
 # --- Запуск приложения ---
 async def main():
-    # Запускаем веб-сервер в фоновой задаче
     asyncio.create_task(start_web_server())
-    # Запускаем поллинг бота
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
