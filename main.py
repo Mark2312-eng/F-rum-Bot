@@ -4,10 +4,9 @@ import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
-from dotenv import load_dotenv
 
-# Настройки прямо в коде (замените на свои актуальные данные)
-TELEGRAM_BOT_TOKEN = "9041502480:AAFePnu1ZB51BtIfp2FctGvuUMV_EslCB50"
+# Настройки бота и форума
+TELEGRAM_BOT_TOKEN = "9041502480:AAED_rPS1t77kp-hX8dzZN_BulG7XKX43Vw"
 XF_URL = "https://whg128846.samp.date/"
 XF_API_KEY = "9GsxRycwYufhdiEP6gYHuNROQpT3ErYk" 
 PORT = int(os.getenv("PORT", 10000))
@@ -81,9 +80,12 @@ async def cmd_punish(message: Message):
         except Exception as e:
             await message.answer(f"⚠️ Ошибка связи с API форума: {e}")
 
-# --- Запуск приложения ---
+# --- Запуск приложения (Polling + Веб-сервер) ---
 async def main():
+    # Запускаем локальный веб-сервер для health-check в фоне
     asyncio.create_task(start_web_server())
+    # Удаляем зависшие вебхуки и запускаем классический Polling
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
