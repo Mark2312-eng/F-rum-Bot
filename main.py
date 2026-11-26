@@ -175,7 +175,7 @@ def build_section_keyboard(section: str) -> InlineKeyboardMarkup:
         "work": [("💼 Моя работа", "view:work"), ("📋 Список вакансий", "view:jobs")],
         "organizations": [("🏛 Список фракций", "view:factions"), ("⚔️ Управление фракцией", "input:faction"), ("👨‍👩‍👧 Семья", "input:family")],
         "economy": [("🛒 Магазин", "view:shop"), ("🎒 Инвентарь", "view:inventory"), ("🏠 Недвижимость", "view:property"), ("🚗 Гараж", "view:garage")],
-        "city": [("📱 Телефон", "view:phone"), ("🗺 Карта города", "view:city"), ("📍 Места и организации", "view:places"), ("📅 События", "view:events")],
+        "city": [("📱 Телефон", "view:phone"), ("🗺 Карта города", "view:city"), ("📍 Места и организации", "view:places"), ("📅 События", "view:events"), ("📝 Запись на событие", "input:event")],
         "quests": [("📋 Задания", "view:quests"), ("⭐ Репутация", "view:reputation")],
         "tournaments": [("🏆 Турниры", "view:tournaments"), ("📝 Управление турниром", "input:tournament")],
         "services": [("🏛 Госслужба", "input:gov"), ("🚓 Служба", "input:service"), ("🏥 Медицина", "input:med"), ("🎓 Образование", "input:edu"), ("🚌 Транспорт", "input:bus"), ("🚕 Такси", "input:taxi")],
@@ -390,6 +390,7 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
     message = callback.message
     if message is None:
         return
+    PENDING_INPUTS.pop(callback.from_user.id, None)
     owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
 
     if data == "owner_panel" or data.startswith("owner:"):
@@ -436,9 +437,11 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
             "taxi": "Введите действие такси (например: orders, order ROUTE FROM TO).",
             "event": "Введите действие события (например: mine, join fair, leave fair).",
         }
-        if action in prompts:
+        if action == "cancel":
+            await message.answer("Ввод отменён.")
+        elif action in prompts:
             PENDING_INPUTS[callback.from_user.id] = action
-            await message.answer(prompts[action])
+            await message.answer(prompts[action], reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✖️ Отмена", callback_data="input:cancel")]]))
         return
 
     if data == "menu:home":
@@ -688,6 +691,7 @@ async def main() -> None:
         LOGGER.info("PostgreSQL connection established")
         runner = await start_web_server(port)
         await bot.delete_webhook(drop_pending_updates=True)
+        await bot.delete_my_commands()
         await dispatcher.start_polling(bot)
     finally:
         if runner is not None:
