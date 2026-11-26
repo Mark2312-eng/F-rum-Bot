@@ -285,7 +285,17 @@ async def webapp_api(request: web.Request) -> web.Response:
             return web.json_response({"items": rows(await database.get_game_factions()), "current": dict(current) if current else None})
         if action == "family":
             family = await database.get_game_family(user_id)
-            return web.json_response({"family": dict(family) if family else None})
+            members = await database.get_game_family_members(int(family["id"])) if family else []
+            member_rows = [{"user_id": m["user_id"], "username": m["username"], "role": m["role"], "joined_at": m["joined_at"].isoformat()} for m in members]
+            return web.json_response({"family": dict(family) if family else None, "members": member_rows})
+        if action == "family_catalog":
+            return web.json_response({"items": rows(await database.get_game_family_catalog())})
+        if action == "faction_roster":
+            faction, members = await database.get_game_faction_roster(user_id)
+            return web.json_response({
+                "faction": dict(faction) if faction else None,
+                "members": [{"user_id": m["user_id"], "username": m["username"], "rank_name": m["rank_name"]} for m in members],
+            })
         if action == "jobs":
             employment = await database.get_game_employment(user_id)
             return web.json_response({"items": rows(await database.get_game_jobs()), "employment": ({"job_id": employment["job_id"], "job_name": employment["job_name"], "description": employment["description"], "reward_coins": employment["reward_coins"], "rank_name": employment["rank_name"], "shifts_completed": employment["shifts_completed"], "last_shift_at": employment["last_shift_at"].isoformat() if employment["last_shift_at"] else None} if employment else None)})
@@ -398,6 +408,15 @@ async def webapp_api(request: web.Request) -> web.Response:
             if not 3 <= len(name) <= 32:
                 return web.json_response({"error": "Название семьи должно содержать от 3 до 32 символов."}, status=400)
             ok, message = await database.create_game_family(user_id, username, name)
+            return web.json_response({"ok": ok, "message": message})
+        if action == "join_family":
+            try:
+                family_id = int(payload.get("family_id", 0))
+            except (TypeError, ValueError):
+                family_id = 0
+            if family_id <= 0:
+                return web.json_response({"error": "Укажи корректный ID семьи."}, status=400)
+            ok, message = await database.join_game_family(user_id, family_id)
             return web.json_response({"ok": ok, "message": message})
         if action == "leave_family":
             ok, message = await database.leave_game_family(user_id)
