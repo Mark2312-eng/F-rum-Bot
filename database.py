@@ -182,6 +182,21 @@ class Database:
                     completed_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     PRIMARY KEY (user_id, quest_code)
                 );
+                CREATE TABLE IF NOT EXISTS game_quest_catalog (
+                    code TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL,
+                    objective TEXT NOT NULL CHECK (objective IN ('shift', 'item', 'faction')),
+                    reward_coins INTEGER NOT NULL CHECK (reward_coins >= 0),
+                    reward_xp INTEGER NOT NULL CHECK (reward_xp >= 0),
+                    reward_reputation INTEGER NOT NULL CHECK (reward_reputation >= 0),
+                    active BOOLEAN NOT NULL DEFAULT TRUE
+                );
+                INSERT INTO game_quest_catalog
+                    (code, title, description, objective, reward_coins, reward_xp, reward_reputation)
+                VALUES
+                    ('first_shift', 'Первый рабочий день', 'Заверши хотя бы одну рабочую смену.', 'shift', 150, 100, 2),
+                    ('collector', 'Собиратель', 'Купи хотя бы один предмет в игровом магазине.', 'item', 75, 60, 1),
+                    ('team_player', 'Командный игрок', 'Вступи в одну из игровых фракций.', 'faction', 100, 80, 3)
+                ON CONFLICT (code) DO NOTHING;
             """)
 
     async def close(self) -> None:
@@ -745,6 +760,92 @@ class Database:
                     user_id, code,
                 )
                 return "ok", price
+
+
+    async def get_game_quests(self, user_id: int) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT q.code, q.title, q.description, q.reward_coins, q.reward_xp,
+                      q.reward_reputation, p.completed_at,
+                      CASE q.objective
+                        WHEN 'shift' THEN EXISTS (
+                            SELECT 1 FROM game_employment e
+                            WHERE e.user_id = $1 AND e.shifts_completed >= 1
+                        )
+                        WHEN 'item' THEN EXISTS (
+                            SELECT 1 FROM game_inventory i
+                            WHERE i.user_id = $1 AND i.quantity >= 1
+                        )
+                        WHEN 'faction' THEN EXISTS (
+                            SELECT 1 FROM game_faction_members f WHERE f.user_id = $1
+                        )
+                        ELSE FALSE
+                      END AS ready
+               FROM game_quest_catalog q
+               LEFT JOIN game_quest_progress p
+                 ON p.user_id = $1 AND p.quest_code = q.code
+               WHERE q.active = TRUE ORDER BY q.code""",
+            user_id,
+        )
+
+    async def claim_game_quest(self, user_id: int, username: str, code: str) -> tuple[str, int, int, int]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                    user_id, username[:64],
+                )
+                await connection.fetchrow(
+                    "SELECT user_id FROM game_players WHERE user_id = $1 FOR UPDATE", user_id
+                )
+                quest = await connection.fetchrow(
+                    """SELECT code, objective, reward_coins, reward_xp, reward_reputation
+                       FROM game_quest_catalog WHERE code = $1 AND active = TRUE""",
+                    code,
+                )
+                if quest is None:
+                    return "missing", 0, 0, 0
+                completed = await connection.fetchval(
+                    "SELECT completed_at FROM game_quest_progress WHERE user_id = $1 AND quest_code = $2",
+                    user_id, code,
+                )
+                if completed is not None:
+                    return "claimed", 0, 0, 0
+                checks = {
+                    "shift": """SELECT EXISTS (SELECT 1 FROM game_employment
+                               WHERE user_id = $1 AND shifts_completed >= 1)""",
+                    "item": """SELECT EXISTS (SELECT 1 FROM game_inventory
+                              WHERE user_id = $1 AND quantity >= 1)""",
+                    "faction": """SELECT EXISTS (SELECT 1 FROM game_faction_members
+                                 WHERE user_id = $1)""",
+                }
+                ready = await connection.fetchval(checks[quest["objective"]], user_id)
+                if not ready:
+                    return "not_ready", 0, 0, 0
+                coins = int(quest["reward_coins"])
+                xp = int(quest["reward_xp"])
+                reputation = int(quest["reward_reputation"])
+                await connection.execute(
+                    """INSERT INTO game_quest_progress (user_id, quest_code, progress, completed_at)
+                       VALUES ($1, $2, 1, NOW())""",
+                    user_id, code,
+                )
+                await connection.execute(
+                    """UPDATE game_players
+                       SET coins = coins + $2, xp = xp + $3,
+                           reputation = reputation + $4, updated_at = NOW()
+                       WHERE user_id = $1""",
+                    user_id, coins, xp, reputation,
+                )
+                return "ok", coins, xp, reputation
+
+    async def get_game_reputation(self, user_id: int) -> asyncpg.Record | None:
+        return await self._require_pool().fetchrow(
+            """SELECT username, xp, coins, reputation FROM game_players
+               WHERE user_id = $1""",
+            user_id,
+        )
 
 
 
