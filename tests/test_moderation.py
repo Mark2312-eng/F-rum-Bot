@@ -23,7 +23,7 @@ class ModerationUnitTests(unittest.TestCase):
         summary = owner_summary(123456, 7)
         self.assertIn("123456", summary)
         self.assertIn("7", summary)
-        self.assertIn("/warn", summary)
+        self.assertIn("кнопки", summary)
         self.assertNotIn("TOKEN", summary)
 
     def test_moderation_log_formats_events(self):
