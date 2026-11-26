@@ -7,6 +7,41 @@ from aiogram.types import Message
 from database import database
 
 
+def format_departments(departments: list) -> str:
+    lines = ["🏢 <b>Государственные отделы</b>"]
+    for item in departments:
+        lines.append(
+            f"\n<b>{item['id']}. {escape(item['name'])}</b>\n"
+            f"{escape(item['description'])}\n"
+            f"Сотрудников: {item['employees']} · Базовая зарплата: {item['base_salary']}"
+        )
+    return "\n".join(lines)
+
+
+def format_tasks(tasks: list) -> str:
+    lines = ["📋 <b>Мои служебные поручения</b>"]
+    lines.extend(
+        f"№{task['id']} · {escape(task['title'])} · {task['reward_coins']} монет · "
+        f"{'выполнено' if task['status'] == 'completed' else 'открыто'}"
+        for task in tasks
+    )
+    if not tasks:
+        lines.append("Поручений пока нет.")
+    return "\n".join(lines)
+
+
+def format_government_roster(name: str, members: list) -> str:
+    lines = [f"👥 <b>{escape(name)}</b>"]
+    lines.extend(
+        f"• {escape(row['username'] or ('Игрок ' + str(row['user_id'])))} — "
+        f"{escape(row['position'])} (ID <code>{row['user_id']}</code>)"
+        for row in members
+    )
+    if not members:
+        lines.append("В отделе пока нет сотрудников.")
+    return "\n".join(lines)
+
+
 async def manage_government(message: Message, command: CommandObject) -> None:
     if not message.from_user:
         return
@@ -42,14 +77,7 @@ async def manage_government(message: Message, command: CommandObject) -> None:
 
     if action == "departments" and len(parts) == 1:
         departments = await database.list_government_departments()
-        lines = ["🏢 <b>Государственные отделы</b>"]
-        for item in departments:
-            lines.append(
-                f"\n<b>{item['id']}. {escape(item['name'])}</b>\n"
-                f"{escape(item['description'])}\n"
-                f"Сотрудников: {item['employees']} · Базовая зарплата: {item['base_salary']}"
-            )
-        await message.answer("\n".join(lines), parse_mode="HTML")
+        await message.answer(format_departments(departments), parse_mode="HTML")
         return
 
     if action in {"join", "roster"} and len(parts) == 2:
@@ -70,15 +98,7 @@ async def manage_government(message: Message, command: CommandObject) -> None:
                 await message.answer("Отдел не найден.")
                 return
             members = await database.get_government_roster(department_id)
-            lines = [f"👥 <b>{escape(selected['name'])}</b>"]
-            lines.extend(
-                f"• {escape(row['username'] or ('Игрок ' + str(row['user_id'])))} — "
-                f"{escape(row['position'])} (ID <code>{row['user_id']}</code>)"
-                for row in members
-            )
-            if not members:
-                lines.append("В отделе пока нет сотрудников.")
-            await message.answer("\n".join(lines), parse_mode="HTML")
+            await message.answer(format_government_roster(selected["name"], members), parse_mode="HTML")
         return
 
     if action == "leave" and len(parts) == 1:
@@ -93,15 +113,7 @@ async def manage_government(message: Message, command: CommandObject) -> None:
 
     if action == "tasks" and len(parts) == 1:
         tasks = await database.get_government_tasks(user_id)
-        lines = ["📋 <b>Мои служебные поручения</b>"]
-        lines.extend(
-            f"№{task['id']} · {escape(task['title'])} · {task['reward_coins']} монет · "
-            f"{'выполнено' if task['status'] == 'completed' else 'открыто'}"
-            for task in tasks
-        )
-        if not tasks:
-            lines.append("Поручений пока нет.")
-        await message.answer("\n".join(lines), parse_mode="HTML")
+        await message.answer(format_tasks(tasks), parse_mode="HTML")
         return
 
     if action == "complete" and len(parts) == 2:
