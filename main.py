@@ -27,6 +27,7 @@ from tournaments import manage_tournament, show_tournaments
 from government import manage_government
 from service import manage_service
 from medical import manage_medical
+from education import manage_education
 
 load_dotenv()
 
@@ -543,6 +544,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(manage_government, Command("gov"))
     dispatcher.message.register(manage_service, Command("service"))
     dispatcher.message.register(manage_medical, Command("med"))
+    dispatcher.message.register(manage_education, Command("edu"))
     dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
     dispatcher.message.register(cmd_owner, Command("owner"))
