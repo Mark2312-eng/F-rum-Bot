@@ -1,0 +1,99 @@
+"""PostgreSQL persistence for Telegram moderation state."""
+import os
+
+import asyncpg
+
+
+class Database:
+    def __init__(self) -> None:
+        self.pool: asyncpg.Pool | None = None
+
+    async def connect(self) -> None:
+        database_url = os.getenv("DATABASE_URL", "").strip()
+        if not database_url:
+            raise RuntimeError("DATABASE_URL is missing; refusing to run moderation without persistent storage")
+        self.pool = await asyncpg.create_pool(
+            dsn=database_url,
+            min_size=1,
+            max_size=5,
+            command_timeout=10,
+            ssl="require",
+        )
+        async with self.pool.acquire() as connection:
+            await connection.execute("""
+                CREATE TABLE IF NOT EXISTS registered_chats (
+                    chat_id BIGINT PRIMARY KEY,
+                    title TEXT NOT NULL DEFAULT '',
+                    connected_by BIGINT NOT NULL,
+                    moderation_mode TEXT NOT NULL DEFAULT 'balanced',
+                    link_policy TEXT NOT NULL DEFAULT 'block',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                ALTER TABLE registered_chats
+                    ADD COLUMN IF NOT EXISTS moderation_mode TEXT NOT NULL DEFAULT 'balanced';
+                ALTER TABLE registered_chats
+                    ADD COLUMN IF NOT EXISTS link_policy TEXT NOT NULL DEFAULT 'block';
+                CREATE TABLE IF NOT EXISTS moderation_warnings (
+                    chat_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    warning_count INTEGER NOT NULL DEFAULT 0 CHECK (warning_count >= 0),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (chat_id, user_id)
+                );
+            """)
+
+    async def close(self) -> None:
+        if self.pool is not None:
+            await self.pool.close()
+            self.pool = None
+
+    def _require_pool(self) -> asyncpg.Pool:
+        if self.pool is None:
+            raise RuntimeError("Database is not connected")
+        return self.pool
+
+    async def register_chat(self, chat_id: int, title: str, owner_id: int) -> None:
+        pool = self._require_pool()
+        await pool.execute(
+            """INSERT INTO registered_chats (chat_id, title, connected_by)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (chat_id) DO UPDATE
+               SET title = EXCLUDED.title, connected_by = EXCLUDED.connected_by""",
+            chat_id, title, owner_id,
+        )
+
+    async def is_chat_registered(self, chat_id: int) -> bool:
+        pool = self._require_pool()
+        return await pool.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM registered_chats WHERE chat_id = $1)",
+            chat_id,
+        )
+
+    async def registered_chat_count(self) -> int:
+        pool = self._require_pool()
+        return int(await pool.fetchval("SELECT COUNT(*) FROM registered_chats"))
+
+    async def add_warning(self, chat_id: int, user_id: int) -> int:
+        pool = self._require_pool()
+        return int(await pool.fetchval(
+            """INSERT INTO moderation_warnings (chat_id, user_id, warning_count)
+               VALUES ($1, $2, 1)
+               ON CONFLICT (chat_id, user_id) DO UPDATE
+               SET warning_count = moderation_warnings.warning_count + 1,
+                   updated_at = NOW()
+               RETURNING warning_count""",
+            chat_id, user_id,
+        ))
+
+    async def reset_warnings(self, chat_id: int, user_id: int) -> None:
+        pool = self._require_pool()
+        await pool.execute(
+            """INSERT INTO moderation_warnings (chat_id, user_id, warning_count)
+               VALUES ($1, $2, 0)
+               ON CONFLICT (chat_id, user_id) DO UPDATE
+               SET warning_count = 0, updated_at = NOW()""",
+            chat_id, user_id,
+        )
+
+
+database = Database()

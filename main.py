@@ -14,7 +14,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiohttp import web
 from dotenv import load_dotenv
 
-from moderation import moderate_message, mute_member, owner_summary, register_group, registered_chat_count, unmute_member, warn_member
+from database import database
+from moderation import moderate_message, mute_member, owner_summary, register_group, unmute_member, warn_member
 
 load_dotenv()
 
@@ -346,7 +347,8 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
         if callback.from_user.id != owner_id or owner_id <= 0:
             await callback.message.answer("⛔ Панель доступна только владельцу бота.")
         else:
-            await callback.message.answer(owner_summary(owner_id), parse_mode="HTML")
+            chat_count = await database.registered_chat_count()
+            await callback.message.answer(owner_summary(owner_id, chat_count), parse_mode="HTML")
     elif callback.message and data in messages:
         await callback.message.answer(messages[data])
 
@@ -434,7 +436,8 @@ async def cmd_owner(message: Message) -> None:
     if owner_id <= 0 or not message.from_user or message.from_user.id != owner_id:
         await message.answer("⛔ Команда доступна только владельцу бота.")
         return
-    await message.answer(owner_summary(owner_id), parse_mode="HTML")
+    chat_count = await database.registered_chat_count()
+    await message.answer(owner_summary(owner_id, chat_count), parse_mode="HTML")
 
 
 async def cmd_myid(message: Message) -> None:
@@ -447,7 +450,8 @@ async def cmd_chats(message: Message) -> None:
     if owner_id <= 0 or not message.from_user or message.from_user.id != owner_id:
         await message.answer("⛔ Команда доступна только владельцу бота.")
         return
-    await message.answer(f"Подключено групп в текущем запуске: <b>{registered_chat_count()}</b>", parse_mode="HTML")
+    chat_count = await database.registered_chat_count()
+    await message.answer(f"Подключено групп: <b>{chat_count}</b>", parse_mode="HTML")
 
 
 async def group_register_handler(message: Message, bot: Bot) -> None:
@@ -515,12 +519,15 @@ async def main() -> None:
     runner: web.AppRunner | None = None
 
     try:
+        await database.connect()
+        LOGGER.info("PostgreSQL connection established")
         runner = await start_web_server(port)
         await bot.delete_webhook(drop_pending_updates=True)
         await dispatcher.start_polling(bot)
     finally:
         if runner is not None:
             await runner.cleanup()
+        await database.close()
         await bot.session.close()
 
 
