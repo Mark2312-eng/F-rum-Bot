@@ -235,5 +235,5 @@ def owner_summary(owner_id: int, chat_count: int) -> str:
         "Команды:\n"
         "/myid — показать ваш ID\n"
         "/chats — показать число подключённых групп\n"
-        "В группе: /connect, /warn, /mute, /unmute — ответом на сообщение."
+        "В группе: /connect, /settings, /warn, /mute, /unmute — ответом на сообщение."
     )
