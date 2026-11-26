@@ -9,6 +9,7 @@ from main import (
     build_main_keyboard,
     build_player_message,
     build_profile_message,
+    build_stats_message,
     find_forum_user,
     format_forum_date,
     get_forum_url,
@@ -86,6 +87,27 @@ class ProfileFormattingTests(unittest.TestCase):
         self.assertIsNone(format_forum_date("not-a-date"))
         self.assertIsNone(format_forum_date(True))
 
+    def test_stats_message_formats_totals_and_escapes_latest_username(self):
+        message = build_stats_message(
+            {
+                "totals": {"threads": 1234, "messages": 5678, "users": 90},
+                "online": {"total": 12, "members": 7, "guests": 5},
+                "latest_user": {"username": "<NewUser>"},
+            },
+            "https://forum.example/",
+        )
+        self.assertIn("1 234", message)
+        self.assertIn("5 678", message)
+        self.assertIn("👥 Пользователей: <b>90</b>", message)
+        self.assertIn("Сейчас онлайн", message)
+        self.assertIn("&lt;NewUser&gt;", message)
+
+    def test_stats_message_handles_missing_metrics(self):
+        self.assertIn(
+            "не вернул доступные",
+            build_stats_message({}, "https://forum.example/"),
+        )
+
     def test_main_keyboard_has_all_first_phase_sections(self):
         keyboard = build_main_keyboard("https://forum.example/")
         callbacks = {
@@ -96,7 +118,7 @@ class ProfileFormattingTests(unittest.TestCase):
         }
         self.assertEqual(
             callbacks,
-            {"profile_help", "punish_help", "stats_soon", "support_soon"},
+            {"profile_help", "punish_help", "stats", "support_soon"},
         )
 
 
