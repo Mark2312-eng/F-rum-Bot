@@ -39,13 +39,13 @@ def format_game_profile(profile, achievements: list) -> str:
     progress = xp % 100
     name = escape(profile["username"] or f"Игрок {profile['user_id']}")
     return (
-        f"🎮 <b>Игровой паспорт: {name}</b>\\n\\n"
-        f"🆔 Telegram ID: <code>{profile['user_id']}</code>\\n"
-        f"⭐ Уровень: <b>{level}</b> ({progress}/100 XP)\\n"
-        f"✨ Опыт: <b>{xp}</b>\\n"
-        f"💰 Баланс: <b>{profile['coins']}</b> монет\\n"
-        f"🏅 Репутация: <b>{profile['reputation']}</b>\\n"
-        f"🔥 Серия ежедневных входов: <b>{profile['daily_streak']}</b>\\n"
+        f"🎮 <b>Игровой паспорт: {name}</b>\n\n"
+        f"🆔 Telegram ID: <code>{profile['user_id']}</code>\n"
+        f"⭐ Уровень: <b>{level}</b> ({progress}/100 XP)\n"
+        f"✨ Опыт: <b>{xp}</b>\n"
+        f"💰 Баланс: <b>{profile['coins']}</b> монет\n"
+        f"🏅 Репутация: <b>{profile['reputation']}</b>\n"
+        f"🔥 Серия ежедневных входов: <b>{profile['daily_streak']}</b>\n"
         f"🎖 Достижений: <b>{len(achievements)}</b>"
     )
 
@@ -54,21 +54,21 @@ def format_leaderboard(players: list, metric: str = "xp") -> str:
     field = RANKING_FIELDS.get(metric, RANKING_FIELDS["xp"])
     _, label, unit = field
     if not players:
-        return f"🏆 <b>Рейтинг игроков по {label}</b>\\n\\nПока нет игровых профилей."
+        return f"🏆 <b>Рейтинг игроков по {label}</b>\n\nПока нет игровых профилей."
     lines = [f"🏆 <b>Рейтинг игроков по {label}</b>", ""]
     for index, player in enumerate(players, start=1):
         name = escape(player["username"] or f"Игрок {player['user_id']}")
         value = int(player[field[0]])
         suffix = f"уровень {int(player['xp']) // 100 + 1}, " if metric == "xp" else ""
         lines.append(f"{index}. <b>{name}</b> — {suffix}{value} {unit}")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def format_family_leaderboard(families: list, metric: str = "xp") -> str:
     field = RANKING_FIELDS.get(metric, RANKING_FIELDS["xp"])
     _, label, unit = field
     if not families:
-        return "👨‍👩‍👧‍👦 <b>Рейтинг семей</b>\\n\\nПока нет зарегистрированных семей."
+        return "👨‍👩‍👧‍👦 <b>Рейтинг семей</b>\n\nПока нет зарегистрированных семей."
     lines = [f"👨‍👩‍👧‍👦 <b>Рейтинг семей по {label}</b>", ""]
     for index, family in enumerate(families, start=1):
         name = escape(family["name"])
@@ -76,7 +76,7 @@ def format_family_leaderboard(families: list, metric: str = "xp") -> str:
             f"{index}. <b>{name}</b> — {int(family['score'])} {unit} "
             f"· {int(family['members'])} участн."
         )
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 def format_achievements(achievements: list) -> str:
@@ -85,7 +85,7 @@ def format_achievements(achievements: list) -> str:
     for code, (title, description) in ACHIEVEMENTS.items():
         mark = "✅" if code in unlocked else "🔒"
         lines.append(f"{mark} <b>{title}</b> — {description}")
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 async def get_ranked_players(metric: str, limit: int = 10) -> list:
@@ -137,8 +137,8 @@ async def claim_daily_reward(message: Message) -> None:
         return
     achievements = await database.sync_game_achievements(message.from_user.id)
     await message.answer(
-        f"🎁 Ежедневная награда получена!\\n💰 +{reward} монет\\n✨ +50 XP\\n"
-        f"🔥 Серия: {profile['daily_streak']} дн.\\n\\n"
+        f"🎁 Ежедневная награда получена!\n💰 +{reward} монет\n✨ +50 XP\n"
+        f"🔥 Серия: {profile['daily_streak']} дн.\n\n"
         + format_game_profile(profile, achievements),
         parse_mode="HTML", reply_markup=game_keyboard(),
     )
@@ -192,7 +192,7 @@ async def handle_game_callback(callback) -> None:
             return
         achievements = await database.sync_game_achievements(callback.from_user.id)
         await callback.message.answer(
-            f"🎁 Получено: +{reward} монет и +50 XP.\\n\\n"
+            f"🎁 Получено: +{reward} монет и +50 XP.\n\n"
             + format_game_profile(profile, achievements),
             parse_mode="HTML", reply_markup=game_keyboard(),
         )
