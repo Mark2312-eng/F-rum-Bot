@@ -197,6 +197,13 @@ class Database:
                     ('collector', 'Собиратель', 'Купи хотя бы один предмет в игровом магазине.', 'item', 75, 60, 1),
                     ('team_player', 'Командный игрок', 'Вступи в одну из игровых фракций.', 'faction', 100, 80, 3)
                 ON CONFLICT (code) DO NOTHING;
+                CREATE TABLE IF NOT EXISTS game_city_event_signups (
+                    event_code TEXT NOT NULL,
+                    user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    username TEXT NOT NULL DEFAULT '',
+                    signed_up_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (event_code, user_id)
+                );
                 CREATE TABLE IF NOT EXISTS game_tournaments (
                     id BIGSERIAL PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -964,6 +971,51 @@ class Database:
                GROUP BY t.id, f.name
                ORDER BY (t.status = 'open') DESC, t.created_at DESC LIMIT $1""",
             max(1, min(int(limit), 20))
+        )
+
+
+    async def signup_city_event(self, user_id: int, username: str, event_code: str) -> str:
+        allowed = {"fair", "open_day", "cleanup"}
+        if event_code not in allowed:
+            return "missing"
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                    user_id, username[:64]
+                )
+                result = await connection.execute(
+                    """INSERT INTO game_city_event_signups (event_code, user_id, username)
+                       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING""",
+                    event_code, user_id, username[:64]
+                )
+                return "joined" if result.endswith("1") else "already"
+
+    async def leave_city_event(self, user_id: int, event_code: str) -> str:
+        if event_code not in {"fair", "open_day", "cleanup"}:
+            return "missing"
+        result = await self._require_pool().execute(
+            "DELETE FROM game_city_event_signups WHERE event_code = $1 AND user_id = $2",
+            event_code, user_id
+        )
+        return "left" if result.endswith("1") else "not_joined"
+
+    async def get_city_event_signups(self, event_code: str) -> list[asyncpg.Record]:
+        if event_code not in {"fair", "open_day", "cleanup"}:
+            return []
+        return await self._require_pool().fetch(
+            """SELECT user_id, username FROM game_city_event_signups
+               WHERE event_code = $1 ORDER BY signed_up_at ASC LIMIT 100""",
+            event_code
+        )
+
+    async def get_user_city_event_signups(self, user_id: int) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT event_code FROM game_city_event_signups
+               WHERE user_id = $1 ORDER BY signed_up_at ASC""",
+            user_id
         )
 
 

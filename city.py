@@ -2,7 +2,10 @@
 from datetime import datetime, timedelta, timezone
 from html import escape
 
+from aiogram.filters import CommandObject
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+
+from database import database
 
 
 CITY_PLACES = [
@@ -22,9 +25,9 @@ CITY_ZONES = [
 ]
 
 EVENTS = [
-    ("Городская ярмарка", "Знакомство с городскими организациями и торговыми точками.", 14),
-    ("День открытых дверей", "Презентации игровых фракций и профессий.", 38),
-    ("Городской субботник", "Совместное общественное мероприятие игроков.", 62),
+    ("Городская ярмарка", "Знакомство с городскими организациями и торговыми точками.", 14, "fair"),
+    ("День открытых дверей", "Презентации игровых фракций и профессий.", 38, "open_day"),
+    ("Городской субботник", "Совместное общественное мероприятие игроков.", 62, "cleanup"),
 ]
 
 
@@ -54,11 +57,11 @@ def format_places() -> str:
 def format_events(now: datetime | None = None) -> str:
     current = now or datetime.now(timezone.utc)
     lines = ["📅 <b>Городские события</b>", ""]
-    for title, description, offset_hours in EVENTS:
+    for title, description, offset_hours, code in EVENTS:
         starts = current + timedelta(hours=offset_hours)
         lines.append(
             f"🎉 <b>{escape(title)}</b>\n{escape(description)}\n"
-            f"🕒 Начало: <b>{starts.strftime('%d.%m.%Y %H:%M UTC')}</b>"
+            f"🕒 Начало: <b>{starts.strftime('%d.%m.%Y %H:%M UTC')}</b>\\nКод записи: <code>{code}</code>"
         )
     lines.append("\nВремя указано по UTC. Это игровые события, не реальные мероприятия.")
     return "\n\n".join(lines)
@@ -98,3 +101,66 @@ async def handle_phone_callback(callback) -> None:
         return
     await callback.message.answer(renderer(), parse_mode="HTML")
     await callback.answer()
+
+
+
+async def manage_city_event(message: Message, command: CommandObject) -> None:
+    if not message.from_user:
+        return
+    parts = (command.args or "").split()
+    if not parts:
+        await message.answer(
+            "Команды событий:\n"
+            "<code>/event join fair</code> — записаться\n"
+            "<code>/event leave fair</code> — отменить запись\n"
+            "<code>/event mine</code> — мои записи\n"
+            "<code>/event list fair</code> — список участников",
+            parse_mode="HTML",
+        )
+        return
+    action = parts[0].lower()
+    user_id = message.from_user.id
+    username = (message.from_user.full_name or message.from_user.username or f"Игрок {user_id}")[:64]
+    if action == "join" and len(parts) == 2:
+        result = await database.signup_city_event(user_id, username, parts[1].lower())
+        responses = {
+            "joined": "✅ Запись на событие подтверждена.",
+            "already": "ℹ️ Ты уже записан на это событие.",
+            "missing": "⚠️ Неизвестный код события. Посмотри /events.",
+        }
+        await message.answer(responses[result])
+    elif action == "leave" and len(parts) == 2:
+        result = await database.leave_city_event(user_id, parts[1].lower())
+        responses = {
+            "left": "Запись отменена.",
+            "not_joined": "Ты не записан на это событие.",
+            "missing": "Неизвестный код события.",
+        }
+        await message.answer(responses[result])
+    elif action == "mine" and len(parts) == 1:
+        rows = await database.get_user_city_event_signups(user_id)
+        labels = {code: title for title, _, _, code in EVENTS}
+        if not rows:
+            await message.answer("У тебя пока нет записей на события.")
+        else:
+            await message.answer(
+                "📅 <b>Мои записи</b>\n" + "\n".join(
+                    f"• {escape(labels[row['event_code']])}" for row in rows
+                ),
+                parse_mode="HTML",
+            )
+    elif action == "list" and len(parts) == 2:
+        code = parts[1].lower()
+        rows = await database.get_city_event_signups(code)
+        labels = {event_code: title for title, _, _, event_code in EVENTS}
+        if code not in labels:
+            await message.answer("Неизвестный код события.")
+        else:
+            lines = [f"👥 <b>{escape(labels[code])}: участники</b>"]
+            lines.extend(
+                f"• {escape(row['username'] or ('Игрок ' + str(row['user_id'])))}"
+                for row in rows
+            )
+            await message.answer("\n".join(lines), parse_mode="HTML")
+    else:
+        await message.answer("Формат: /event join|leave|mine|list КОД")
