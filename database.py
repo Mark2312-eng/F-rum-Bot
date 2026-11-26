@@ -133,6 +133,7 @@ class Database:
                     ('ФСБ', 'Государственная служба безопасности игрового мира.'),
                     ('МВД', 'Полиция и общественная служба игрового мира.'),
                     ('Городская больница', 'Медицинская организация игрового города.')
+                    ,('Городское образование', 'Школы и университеты игрового города.')
                 ON CONFLICT (name) DO NOTHING;
                 CREATE TABLE IF NOT EXISTS game_medical_centers (
                     id BIGSERIAL PRIMARY KEY,
@@ -189,6 +190,64 @@ class Database:
                     ('training', 'Посетить учебное занятие медицинского отдела', 55, 20)
                 ) AS m(code, title, reward_coins, reward_xp)
                 WHERE f.name = 'Городская больница'
+                ON CONFLICT (faction_id, code) DO NOTHING;
+                CREATE TABLE IF NOT EXISTS game_education_institutions (
+                    id BIGSERIAL PRIMARY KEY,
+                    faction_id BIGINT NOT NULL REFERENCES game_factions(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL UNIQUE,
+                    institution_type TEXT NOT NULL,
+                    district TEXT NOT NULL,
+                    UNIQUE (id, faction_id)
+                );
+                CREATE TABLE IF NOT EXISTS game_education_students (
+                    user_id BIGINT PRIMARY KEY REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    faction_id BIGINT NOT NULL REFERENCES game_factions(id) ON DELETE CASCADE,
+                    institution_id BIGINT NOT NULL,
+                    enrolled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    FOREIGN KEY (institution_id, faction_id)
+                        REFERENCES game_education_institutions(id, faction_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS game_education_institution_idx
+                    ON game_education_students (institution_id, enrolled_at);
+                CREATE TABLE IF NOT EXISTS game_education_courses (
+                    id BIGSERIAL PRIMARY KEY,
+                    faction_id BIGINT NOT NULL REFERENCES game_factions(id) ON DELETE CASCADE,
+                    code TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    course_type TEXT NOT NULL CHECK (course_type IN ('lesson', 'exam')),
+                    reward_coins INTEGER NOT NULL CHECK (reward_coins > 0),
+                    reward_xp INTEGER NOT NULL CHECK (reward_xp >= 0),
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    UNIQUE (faction_id, code)
+                );
+                CREATE TABLE IF NOT EXISTS game_education_completions (
+                    user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    course_id BIGINT NOT NULL REFERENCES game_education_courses(id) ON DELETE CASCADE,
+                    completed_on DATE NOT NULL DEFAULT CURRENT_DATE,
+                    completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (user_id, course_id, completed_on)
+                );
+                INSERT INTO game_education_institutions (faction_id, name, institution_type, district)
+                SELECT f.id, i.name, i.institution_type, i.district
+                FROM game_factions f
+                CROSS JOIN (VALUES
+                    ('Средняя школа № 1', 'Школа', 'Центр'),
+                    ('Городской технический колледж', 'Колледж', 'Северный район'),
+                    ('Виртуальный городской университет', 'Университет', 'Центр')
+                ) AS i(name, institution_type, district)
+                WHERE f.name = 'Городское образование'
+                ON CONFLICT (name) DO NOTHING;
+                INSERT INTO game_education_courses
+                    (faction_id, code, title, course_type, reward_coins, reward_xp)
+                SELECT f.id, c.code, c.title, c.course_type, c.reward_coins, c.reward_xp
+                FROM game_factions f
+                CROSS JOIN (VALUES
+                    ('history', 'Вводное занятие по истории игрового города', 'lesson', 35, 15),
+                    ('civics', 'Занятие по устройству городских служб', 'lesson', 40, 18),
+                    ('it_basics', 'Практикум по цифровой грамотности', 'lesson', 45, 20),
+                    ('final_quiz', 'Итоговый учебный экзамен по материалам занятий', 'exam', 80, 35)
+                ) AS c(code, title, course_type, reward_coins, reward_xp)
+                WHERE f.name = 'Городское образование'
                 ON CONFLICT (faction_id, code) DO NOTHING;
                 CREATE TABLE IF NOT EXISTS game_service_profiles (
                     user_id BIGINT PRIMARY KEY REFERENCES game_players(user_id) ON DELETE CASCADE,
@@ -1781,6 +1840,150 @@ class Database:
                      e.joined_at LIMIT 100""", user_id
             )
             return center, members
+
+
+    async def list_education_institutions(self) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT i.id, i.name, i.institution_type, i.district,
+                      COUNT(s.user_id)::int AS students
+               FROM game_education_institutions i
+               LEFT JOIN game_education_students s ON s.institution_id = i.id
+               GROUP BY i.id ORDER BY i.id"""
+        )
+
+    async def enroll_education_student(self, user_id: int, username: str, institution_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                    user_id, username[:64]
+                )
+                institution = await connection.fetchrow(
+                    """SELECT i.id, i.name, i.faction_id FROM game_education_institutions i
+                       WHERE i.id = $1""", institution_id
+                )
+                if institution is None:
+                    return False, "Учебное заведение не найдено. Используй /edu institutions."
+                member = await connection.fetchval(
+                    """SELECT 1 FROM game_faction_members
+                       WHERE faction_id = $1 AND user_id = $2""",
+                    institution["faction_id"], user_id
+                )
+                if not member:
+                    return False, "Сначала вступи во фракцию «Городское образование» через /factions."
+                current = await connection.fetchval(
+                    "SELECT 1 FROM game_education_students WHERE user_id = $1", user_id
+                )
+                if current:
+                    return False, "Ты уже зачислен в учебное заведение. Сначала используй /edu leave."
+                await connection.execute(
+                    """INSERT INTO game_education_students (user_id, faction_id, institution_id)
+                       VALUES ($1, $2, $3)""", user_id, institution["faction_id"], institution_id
+                )
+                return True, f"Ты зачислен: «{institution['name']}»."
+
+    async def leave_education_institution(self, user_id: int) -> bool:
+        result = await self._require_pool().execute(
+            "DELETE FROM game_education_students WHERE user_id = $1", user_id
+        )
+        return result.endswith("1")
+
+    async def get_education_profile(self, user_id: int) -> asyncpg.Record | None:
+        return await self._require_pool().fetchrow(
+            """SELECT s.user_id, s.enrolled_at, i.name AS institution_name,
+                      i.institution_type, i.district, p.username
+               FROM game_education_students s
+               JOIN game_education_institutions i ON i.id = s.institution_id
+               JOIN game_players p ON p.user_id = s.user_id
+               WHERE s.user_id = $1""", user_id
+        )
+
+    async def list_education_courses(self, user_id: int) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT c.code, c.title, c.course_type, c.reward_coins, c.reward_xp,
+                      EXISTS (
+                        SELECT 1 FROM game_education_completions x
+                        WHERE x.user_id = $1 AND x.course_id = c.id
+                          AND x.completed_on = CURRENT_DATE
+                      ) AS completed_today
+               FROM game_education_students s
+               JOIN game_education_courses c ON c.faction_id = s.faction_id
+               WHERE s.user_id = $1 AND c.active = TRUE ORDER BY c.id""", user_id
+        )
+
+    async def complete_education_course(self, user_id: int, code: str, course_type: str) -> tuple[bool, str]:
+        if course_type not in ("lesson", "exam"):
+            return False, "Неизвестный тип учебной активности."
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                course = await connection.fetchrow(
+                    """SELECT c.id, c.title, c.course_type, c.reward_coins, c.reward_xp
+                       FROM game_education_students s
+                       JOIN game_education_courses c ON c.faction_id = s.faction_id
+                       WHERE s.user_id = $1 AND c.code = $2 AND c.course_type = $3
+                         AND c.active = TRUE
+                       FOR UPDATE OF s""", user_id, code, course_type
+                )
+                if course is None:
+                    return False, "Учебная активность не найдена. Используй /edu classes."
+                if course_type == "exam":
+                    lessons = await connection.fetchval(
+                        """SELECT COUNT(*) FROM game_education_courses c
+                           WHERE c.faction_id = (
+                             SELECT faction_id FROM game_education_students WHERE user_id = $1
+                           ) AND c.course_type = 'lesson' AND c.active = TRUE
+                             AND EXISTS (
+                               SELECT 1 FROM game_education_completions x
+                               WHERE x.user_id = $1 AND x.course_id = c.id
+                             )""", user_id
+                    )
+                    required = await connection.fetchval(
+                        """SELECT COUNT(*) FROM game_education_courses
+                           WHERE faction_id = (
+                             SELECT faction_id FROM game_education_students WHERE user_id = $1
+                           ) AND course_type = 'lesson' AND active = TRUE""", user_id
+                    )
+                    if lessons < required:
+                        return False, "Сначала заверши все доступные занятия, затем сдавай экзамен."
+                inserted = await connection.fetchval(
+                    """INSERT INTO game_education_completions (user_id, course_id, completed_on)
+                       VALUES ($1, $2, CURRENT_DATE)
+                       ON CONFLICT DO NOTHING RETURNING user_id""",
+                    user_id, course["id"]
+                )
+                if inserted is None:
+                    return False, "Эта активность уже засчитана сегодня."
+                await connection.execute(
+                    """UPDATE game_players SET coins = coins + $1, xp = xp + $2,
+                       updated_at = NOW() WHERE user_id = $3""",
+                    course["reward_coins"], course["reward_xp"], user_id
+                )
+                return True, f"«{course['title']}»: +{course['reward_coins']} монет, +{course['reward_xp']} XP."
+
+    async def get_education_roster(self, user_id: int) -> tuple[asyncpg.Record | None, list[asyncpg.Record]]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            institution = await connection.fetchrow(
+                """SELECT i.id, i.name, f.name AS faction_name
+                   FROM game_education_students s
+                   JOIN game_education_institutions i ON i.id = s.institution_id
+                   JOIN game_factions f ON f.id = s.faction_id
+                   WHERE s.user_id = $1""", user_id
+            )
+            if institution is None:
+                return None, []
+            students = await connection.fetch(
+                """SELECT s.user_id, p.username, i.name AS institution_name, s.enrolled_at
+                   FROM game_education_students s
+                   JOIN game_players p ON p.user_id = s.user_id
+                   JOIN game_education_institutions i ON i.id = s.institution_id
+                   WHERE s.institution_id = $1
+                   ORDER BY s.enrolled_at LIMIT 100""", institution["id"]
+            )
+            return institution, students
 
 
 database = Database()
