@@ -18,6 +18,7 @@ from database import database
 from moderation import moderate_message, mute_member, owner_summary, register_group, show_moderation_log, unmute_member, warn_member
 from group_settings import apply_setting_callback, show_group_settings
 from game import claim_daily_reward, handle_game_callback, show_achievements, show_game_profile, show_leaderboard
+from work import handle_work_callback, show_jobs, show_work
 
 load_dotenv()
 
@@ -513,6 +514,8 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(claim_daily_reward, Command("daily"))
     dispatcher.message.register(show_leaderboard, Command("top"))
     dispatcher.message.register(show_achievements, Command("achievements"))
+    dispatcher.message.register(show_jobs, Command("jobs"))
+    dispatcher.message.register(show_work, Command("work"))
     dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
     dispatcher.message.register(cmd_owner, Command("owner"))
@@ -527,6 +530,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(group_moderation_handler)
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
     dispatcher.callback_query.register(handle_game_callback, F.data.startswith("game:"))
+    dispatcher.callback_query.register(handle_work_callback, F.data.startswith("work:"))
     dispatcher.callback_query.register(group_setting_callback, F.data.startswith("cfg:"))
     return dispatcher
 
