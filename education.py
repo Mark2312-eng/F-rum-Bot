@@ -45,6 +45,7 @@ def format_education_profile(profile) -> str:
         f"Учебное заведение: <b>{escape(profile['institution_name'])}</b>\n"
         f"Тип: <b>{escape(profile['institution_type'])}</b>\n"
         f"Район: <b>{escape(profile['district'])}</b>\n"
+        f"Группа: <b>{escape(profile['group_name'] or 'не назначена')}</b>\\n"
         f"Telegram ID: <code>{profile['user_id']}</code>"
     )
 
@@ -68,7 +69,7 @@ def format_education_roster(institution, students: list) -> str:
     lines = [f"👥 <b>{escape(institution['name'])} — список учащихся</b>"]
     for student in students:
         name = student["username"] or f"Игрок {student['user_id']}"
-        lines.append(f"• {escape(name)} · ID <code>{student['user_id']}</code>")
+        lines.append(f"• {escape(name)} · {escape(student['group_code'] or 'без группы')} · ID <code>{student['user_id']}</code>")
     if not students:
         lines.append("Учащихся пока нет.")
     return "\n".join(lines)
