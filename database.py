@@ -81,6 +81,38 @@ class Database:
                     role TEXT NOT NULL DEFAULT 'member', joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     PRIMARY KEY (family_id, user_id), UNIQUE (user_id)
                 );
+                CREATE TABLE IF NOT EXISTS game_government_departments (
+                    id BIGSERIAL PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT NOT NULL DEFAULT '',
+                    base_salary INTEGER NOT NULL DEFAULT 100 CHECK (base_salary >= 0),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS game_government_employees (
+                    user_id BIGINT PRIMARY KEY REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    department_id BIGINT NOT NULL REFERENCES game_government_departments(id),
+                    position TEXT NOT NULL DEFAULT 'Сотрудник',
+                    hired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    last_salary_at TIMESTAMPTZ
+                );
+                CREATE INDEX IF NOT EXISTS game_government_department_idx
+                    ON game_government_employees (department_id);
+                CREATE TABLE IF NOT EXISTS game_government_tasks (
+                    id BIGSERIAL PRIMARY KEY,
+                    department_id BIGINT NOT NULL REFERENCES game_government_departments(id) ON DELETE CASCADE,
+                    assigned_to BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    title TEXT NOT NULL,
+                    reward_coins INTEGER NOT NULL DEFAULT 50 CHECK (reward_coins >= 0),
+                    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'completed')),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    completed_at TIMESTAMPTZ
+                );
+                INSERT INTO game_government_departments (name, description, base_salary)
+                VALUES
+                    ('Мэрия', 'Городское управление и административные поручения.', 150),
+                    ('Городское благоустройство', 'Порядок, инфраструктура и общественные проекты.', 120),
+                    ('Транспортный департамент', 'Городской транспорт и дорожные проекты.', 130)
+                ON CONFLICT (name) DO NOTHING;
                 CREATE TABLE IF NOT EXISTS game_factions (
                     id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE,
                     description TEXT NOT NULL DEFAULT ''
@@ -1164,6 +1196,160 @@ class Database:
                     "UPDATE game_factions SET leader_id = $1 WHERE id = $2", target_id, faction_id
                 )
                 return True, "Лидерство успешно передано."
+
+
+    async def list_government_departments(self) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT d.id, d.name, d.description, d.base_salary,
+                      COUNT(e.user_id)::int AS employees
+               FROM game_government_departments d
+               LEFT JOIN game_government_employees e ON e.department_id = d.id
+               GROUP BY d.id ORDER BY d.id"""
+        )
+
+    async def join_government_department(self, user_id: int, username: str, department_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                    user_id, username[:64]
+                )
+                is_civil_servant = await connection.fetchval(
+                    """SELECT EXISTS (
+                        SELECT 1 FROM game_faction_members m
+                        JOIN game_factions f ON f.id = m.faction_id
+                        WHERE m.user_id = $1 AND f.name = 'Правительство Москвы'
+                    )""", user_id
+                )
+                if not is_civil_servant:
+                    return False, "Для устройства сначала вступи во фракцию «Правительство Москвы»."
+                department = await connection.fetchrow(
+                    "SELECT id, name FROM game_government_departments WHERE id = $1", department_id
+                )
+                if department is None:
+                    return False, "Такого отдела нет. Используй /gov departments."
+                current = await connection.fetchval(
+                    "SELECT department_id FROM game_government_employees WHERE user_id = $1", user_id
+                )
+                if current is not None:
+                    return False, "Ты уже работаешь в государственном отделе."
+                await connection.execute(
+                    """INSERT INTO game_government_employees (user_id, department_id)
+                       VALUES ($1, $2)""", user_id, department_id
+                )
+                return True, f"Ты принят в отдел «{department['name']}»."
+
+    async def leave_government_department(self, user_id: int) -> bool:
+        result = await self._require_pool().execute(
+            "DELETE FROM game_government_employees WHERE user_id = $1", user_id
+        )
+        return result.endswith("1")
+
+    async def get_government_employee(self, user_id: int) -> asyncpg.Record | None:
+        return await self._require_pool().fetchrow(
+            """SELECT e.user_id, e.position, e.hired_at, e.last_salary_at,
+                      d.id AS department_id, d.name AS department_name,
+                      d.base_salary, p.username
+               FROM game_government_employees e
+               JOIN game_government_departments d ON d.id = e.department_id
+               JOIN game_players p ON p.user_id = e.user_id
+               WHERE e.user_id = $1""", user_id
+        )
+
+    async def get_government_roster(self, department_id: int) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT e.user_id, e.position, p.username
+               FROM game_government_employees e
+               JOIN game_players p ON p.user_id = e.user_id
+               WHERE e.department_id = $1
+               ORDER BY CASE e.position WHEN 'Начальник отдела' THEN 0 ELSE 1 END,
+                        e.hired_at LIMIT 100""", department_id
+        )
+
+    async def assign_government_task(self, actor_id: int, target_id: int, title: str, reward: int) -> tuple[bool, str]:
+        if not 1 <= reward <= 500:
+            return False, "Награда должна быть от 1 до 500 монет."
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                actor = await connection.fetchrow(
+                    """SELECT department_id, position FROM game_government_employees
+                       WHERE user_id = $1 FOR UPDATE""", actor_id
+                )
+                if actor is None or actor["position"] != "Начальник отдела":
+                    return False, "Назначать поручения может только начальник отдела."
+                target = await connection.fetchval(
+                    """SELECT 1 FROM game_government_employees
+                       WHERE user_id = $1 AND department_id = $2""", target_id, actor["department_id"]
+                )
+                if not target:
+                    return False, "Сотрудник не найден в твоём отделе."
+                task_id = await connection.fetchval(
+                    """INSERT INTO game_government_tasks
+                       (department_id, assigned_to, title, reward_coins)
+                       VALUES ($1, $2, $3, $4) RETURNING id""",
+                    actor["department_id"], target_id, title[:120], reward
+                )
+                return True, f"Поручение №{task_id} назначено."
+
+    async def get_government_tasks(self, user_id: int) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT id, title, reward_coins, status FROM game_government_tasks
+               WHERE assigned_to = $1 ORDER BY created_at DESC LIMIT 20""", user_id
+        )
+
+    async def complete_government_task(self, user_id: int, task_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                task = await connection.fetchrow(
+                    """SELECT id, reward_coins FROM game_government_tasks
+                       WHERE id = $1 AND assigned_to = $2 AND status = 'open' FOR UPDATE""",
+                    task_id, user_id
+                )
+                if task is None:
+                    return False, "Открытое поручение с таким номером не найдено."
+                await connection.execute(
+                    "UPDATE game_government_tasks SET status = 'completed', completed_at = NOW() WHERE id = $1",
+                    task_id
+                )
+                await connection.execute(
+                    "UPDATE game_players SET coins = coins + $1, updated_at = NOW() WHERE user_id = $2",
+                    task["reward_coins"], user_id
+                )
+                return True, f"Поручение выполнено. Начислено {task['reward_coins']} монет."
+
+    async def claim_government_salary(self, user_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                employee = await connection.fetchrow(
+                    """SELECT e.position, e.last_salary_at, d.base_salary
+                       FROM game_government_employees e
+                       JOIN game_government_departments d ON d.id = e.department_id
+                       WHERE e.user_id = $1 FOR UPDATE OF e""", user_id
+                )
+                if employee is None:
+                    return False, "Сначала устройся в государственный отдел через /gov join ID."
+                if employee["last_salary_at"] is not None:
+                    available = await connection.fetchval(
+                        "SELECT $1::timestamptz + INTERVAL '24 hours' <= NOW()",
+                        employee["last_salary_at"]
+                    )
+                    if not available:
+                        return False, "Зарплату можно получать раз в 24 часа."
+                salary = employee["base_salary"] + (100 if employee["position"] == "Начальник отдела" else 0)
+                await connection.execute(
+                    "UPDATE game_players SET coins = coins + $1, updated_at = NOW() WHERE user_id = $2",
+                    salary, user_id
+                )
+                await connection.execute(
+                    "UPDATE game_government_employees SET last_salary_at = NOW() WHERE user_id = $1",
+                    user_id
+                )
+                return True, f"Зарплата начислена: {salary} игровых монет."
 
 
 database = Database()
