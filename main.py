@@ -659,6 +659,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
     dispatcher.callback_query.register(cmd_menu_callback, F.data.startswith("menu:"))
     dispatcher.callback_query.register(cmd_menu_callback, F.data.startswith("owner:"))
+    dispatcher.callback_query.register(cmd_menu_callback, F.data.startswith("input:"))
     dispatcher.callback_query.register(cmd_view_callback, F.data.startswith("view:"))
     dispatcher.callback_query.register(handle_game_callback, F.data.startswith("game:"))
     dispatcher.callback_query.register(handle_work_callback, F.data.startswith("work:"))
