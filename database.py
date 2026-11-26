@@ -2287,6 +2287,13 @@ class Database:
                     "SELECT coins FROM game_players WHERE user_id = $1 FOR UPDATE",
                     passenger_id
                 )
+                active_order = await connection.fetchval(
+                    """SELECT EXISTS(SELECT 1 FROM game_taxi_orders
+                       WHERE passenger_id = $1 AND status IN ('open', 'accepted'))""",
+                    passenger_id
+                )
+                if active_order:
+                    return False, "У тебя уже есть активный заказ такси."
                 if int(player["coins"]) < fare:
                     return False, f"Недостаточно монет. Поездка стоит {fare}."
                 await connection.execute(
@@ -2408,15 +2415,14 @@ class Database:
                 )
                 if order is None or order["status"] != "completed" or order["driver_id"] is None:
                     return False, "Оценить можно только завершённую поездку."
-                await connection.execute(
+                saved = await connection.fetchval(
                     """INSERT INTO game_taxi_ratings (order_id, passenger_id, driver_id, rating)
-                       VALUES ($1, $2, $3, $4) ON CONFLICT (order_id) DO NOTHING""",
+                       VALUES ($1, $2, $3, $4)
+                       ON CONFLICT (order_id) DO NOTHING
+                       RETURNING rating""",
                     order_id, passenger_id, order["driver_id"], rating
                 )
-                saved = await connection.fetchval(
-                    "SELECT rating FROM game_taxi_ratings WHERE order_id = $1", order_id
-                )
-                if int(saved) != rating:
+                if saved is None:
                     return False, "Эта поездка уже оценена."
                 return True, "Оценка сохранена."
 
