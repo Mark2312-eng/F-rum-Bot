@@ -1,16 +1,21 @@
 """Telegram bot for querying player information on a XenForo forum."""
 
 import asyncio
+import hashlib
+import hmac
+import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 from html import escape
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit
 
 import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 from aiohttp import web
 from dotenv import load_dotenv
 
@@ -164,6 +169,9 @@ def build_main_keyboard(forum_url: str, is_owner: bool = False) -> InlineKeyboar
     ]
     if is_owner:
         rows.append([InlineKeyboardButton(text="⚙️ Панель владельца", callback_data="owner_panel")])
+    webapp_url = os.getenv("WEBAPP_URL", "https://f-rum-bot.onrender.com").strip()
+    if webapp_url.startswith("https://"):
+        rows.append([InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=webapp_url))])
     rows.append([InlineKeyboardButton(text="🌐 Открыть форум", url=forum_url)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -203,10 +211,60 @@ async def health_check(_request: web.Request) -> web.Response:
     return web.Response(text="Telegram Bot is running!")
 
 
+def validate_telegram_init_data(init_data: str, bot_token: str) -> dict | None:
+    """Validate Telegram Mini App initData using Telegram's HMAC procedure."""
+    if not init_data or len(init_data) > 8192 or not bot_token:
+        return None
+    try:
+        values = dict(parse_qsl(init_data, keep_blank_values=True, strict_parsing=True))
+        received_hash = values.pop("hash", "")
+        auth_date = int(values.get("auth_date", "0"))
+        if not received_hash or abs(int(time.time()) - auth_date) > 86400:
+            return None
+        check_string = "\n".join(f"{key}={value}" for key, value in sorted(values.items()))
+        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+        expected_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected_hash, received_hash):
+            return None
+        user = json.loads(values.get("user", "{}"))
+        if not isinstance(user, dict) or not isinstance(user.get("id"), int):
+            return None
+        return user
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+async def webapp_index(_request: web.Request) -> web.StreamResponse:
+    """Serve the Telegram Mini App frontend."""
+    page = Path(__file__).parent / "webapp" / "index.html"
+    if not page.is_file():
+        return web.Response(status=404, text="Mini App frontend not found")
+    return web.FileResponse(page)
+
+
+async def webapp_me(request: web.Request) -> web.Response:
+    """Return the authenticated Telegram user's game profile."""
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        return web.json_response({"error": "Некорректный запрос"}, status=400)
+    init_data = payload.get("init_data", "") if isinstance(payload, dict) else ""
+    user = validate_telegram_init_data(str(init_data), os.getenv("TELEGRAM_BOT_TOKEN", "").strip())
+    if user is None:
+        return web.json_response({"error": "Не удалось подтвердить Telegram. Откройте приложение из бота."}, status=401)
+    profile = await database.get_game_profile(user["id"], str(user.get("username") or user.get("first_name") or "Игрок"))
+    return web.json_response({
+        "user": {"id": user["id"], "first_name": user.get("first_name", ""), "username": user.get("username", "")},
+        "profile": {"coins": profile["coins"], "xp": profile["xp"], "reputation": profile["reputation"]},
+    })
+
+
 async def start_web_server(port: int) -> web.AppRunner:
-    """Start the health server or raise immediately if binding fails."""
-    app = web.Application()
-    app.router.add_get("/", health_check)
+    """Start the health server and Telegram Mini App routes."""
+    app = web.Application(client_max_size=16 * 1024)
+    app.router.add_get("/", webapp_index)
+    app.router.add_get("/health", health_check)
+    app.router.add_post("/api/webapp/me", webapp_me)
     runner = web.AppRunner(app, access_log=LOGGER)
     await runner.setup()
 
