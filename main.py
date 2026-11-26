@@ -438,8 +438,8 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
     if data.startswith("input:"):
         action = data.split(":", 1)[1]
         prompts = {
-            "faction": "Введите действие для фракции (например: info, members, claim, promote ID, demote ID, kick ID, transfer ID).",
-            "family": "Введите действие для семьи (например: info, create НАЗВАНИЕ, invite ID, kick ID).",
+            "faction": "Введите действие: info — информация; members — состав; claim — занять свободное лидерство; promote ID / demote ID — изменить ранг; kick ID — исключить; transfer ID — передать лидерство.",
+            "family": "Введите одно из доступных действий: info — информация о семье; create НАЗВАНИЕ — создать семью; join ID — вступить по ID; leave — покинуть семью.",
             "tournament": "Введите действие (например: create Название 500, join ID, finish ID FAMILY_ID).",
             "gov": "Введите действие госслужбы (например: departments, profile, join ID, salary, tasks).",
             "service": "Введите действие службы (например: profile, apply МВД, tasks, leave).",
