@@ -131,8 +131,65 @@ class Database:
                     ('Правительство Москвы', 'Городские службы и управление городом.'),
                     ('Армия России', 'Военная организация игрового мира.'),
                     ('ФСБ', 'Государственная служба безопасности игрового мира.'),
-                    ('МВД', 'Полиция и общественная служба игрового мира.')
+                    ('МВД', 'Полиция и общественная служба игрового мира.'),
+                    ('Городская больница', 'Медицинская организация игрового города.')
                 ON CONFLICT (name) DO NOTHING;
+                CREATE TABLE IF NOT EXISTS game_medical_centers (
+                    id BIGSERIAL PRIMARY KEY,
+                    faction_id BIGINT NOT NULL REFERENCES game_factions(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL UNIQUE,
+                    district TEXT NOT NULL,
+                    UNIQUE (id, faction_id)
+                );
+                CREATE TABLE IF NOT EXISTS game_medical_employees (
+                    user_id BIGINT PRIMARY KEY REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    faction_id BIGINT NOT NULL REFERENCES game_factions(id) ON DELETE CASCADE,
+                    center_id BIGINT NOT NULL,
+                    job_title TEXT NOT NULL DEFAULT 'Стажёр',
+                    joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    FOREIGN KEY (center_id, faction_id)
+                        REFERENCES game_medical_centers(id, faction_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS game_medical_center_idx
+                    ON game_medical_employees (center_id, job_title);
+                CREATE TABLE IF NOT EXISTS game_medical_missions (
+                    id BIGSERIAL PRIMARY KEY,
+                    faction_id BIGINT NOT NULL REFERENCES game_factions(id) ON DELETE CASCADE,
+                    code TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    reward_coins INTEGER NOT NULL CHECK (reward_coins > 0),
+                    reward_xp INTEGER NOT NULL CHECK (reward_xp >= 0),
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    UNIQUE (faction_id, code)
+                );
+                CREATE TABLE IF NOT EXISTS game_medical_completions (
+                    user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    mission_id BIGINT NOT NULL REFERENCES game_medical_missions(id) ON DELETE CASCADE,
+                    completed_on DATE NOT NULL DEFAULT CURRENT_DATE,
+                    completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (user_id, mission_id, completed_on)
+                );
+                INSERT INTO game_medical_centers (faction_id, name, district)
+                SELECT f.id, c.name, c.district
+                FROM game_factions f
+                CROSS JOIN (VALUES
+                    ('Центральная городская больница', 'Центр'),
+                    ('Северная клиника', 'Северный район'),
+                    ('Станция городской медицины', 'Южный район')
+                ) AS c(name, district)
+                WHERE f.name = 'Городская больница'
+                ON CONFLICT (name) DO NOTHING;
+                INSERT INTO game_medical_missions (faction_id, code, title, reward_coins, reward_xp)
+                SELECT f.id, m.code, m.title, m.reward_coins, m.reward_xp
+                FROM game_factions f
+                CROSS JOIN (VALUES
+                    ('orientation', 'Пройти вводную экскурсию по игровой больнице', 40, 15),
+                    ('records', 'Заполнить учебную карточку вымышленного пациента-NPC', 50, 20),
+                    ('community', 'Принять участие в городском дне здоровья для NPC', 65, 25),
+                    ('training', 'Посетить учебное занятие медицинского отдела', 55, 20)
+                ) AS m(code, title, reward_coins, reward_xp)
+                WHERE f.name = 'Городская больница'
+                ON CONFLICT (faction_id, code) DO NOTHING;
                 CREATE TABLE IF NOT EXISTS game_service_profiles (
                     user_id BIGINT PRIMARY KEY REFERENCES game_players(user_id) ON DELETE CASCADE,
                     faction_id BIGINT NOT NULL REFERENCES game_factions(id) ON DELETE CASCADE,
@@ -1564,6 +1621,167 @@ class Database:
                      p.joined_at LIMIT 100""", faction["id"]
             )
             return faction, members
+
+
+    async def list_medical_centers(self) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT c.id, c.name, c.district, COUNT(e.user_id)::int AS employees
+               FROM game_medical_centers c
+               LEFT JOIN game_medical_employees e ON e.center_id = c.id
+               GROUP BY c.id ORDER BY c.id"""
+        )
+
+    async def apply_medical_center(self, user_id: int, username: str, center_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                    user_id, username[:64]
+                )
+                center = await connection.fetchrow(
+                    """SELECT c.id, c.name, c.faction_id FROM game_medical_centers c
+                       WHERE c.id = $1""", center_id
+                )
+                if center is None:
+                    return False, "Медицинский центр не найден. Используй /med centers."
+                member = await connection.fetchval(
+                    """SELECT 1 FROM game_faction_members
+                       WHERE faction_id = $1 AND user_id = $2""",
+                    center["faction_id"], user_id
+                )
+                if not member:
+                    return False, "Сначала вступи во фракцию «Городская больница» через /factions."
+                current = await connection.fetchval(
+                    "SELECT 1 FROM game_medical_employees WHERE user_id = $1", user_id
+                )
+                if current:
+                    return False, "Ты уже работаешь в медицинской организации."
+                await connection.execute(
+                    """INSERT INTO game_medical_employees (user_id, faction_id, center_id)
+                       VALUES ($1, $2, $3)""", user_id, center["faction_id"], center_id
+                )
+                return True, f"Ты принят в организацию «{center['name']}» на должность «Стажёр»."
+
+    async def leave_medical_center(self, user_id: int) -> bool:
+        result = await self._require_pool().execute(
+            "DELETE FROM game_medical_employees WHERE user_id = $1", user_id
+        )
+        return result.endswith("1")
+
+    async def get_medical_profile(self, user_id: int) -> asyncpg.Record | None:
+        return await self._require_pool().fetchrow(
+            """SELECT e.user_id, e.job_title, e.joined_at, c.name AS center_name,
+                      c.district, f.leader_id, p.username
+               FROM game_medical_employees e
+               JOIN game_medical_centers c ON c.id = e.center_id
+               JOIN game_factions f ON f.id = e.faction_id
+               JOIN game_players p ON p.user_id = e.user_id
+               WHERE e.user_id = $1""", user_id
+        )
+
+    async def change_medical_job_title(self, actor_id: int, target_id: int, direction: int) -> tuple[bool, str]:
+        titles = ["Стажёр", "Медицинский сотрудник", "Старший сотрудник", "Заместитель главврача", "Главврач"]
+        if direction not in (-1, 1) or actor_id == target_id:
+            return False, "Некорректная цель изменения должности."
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                actor = await connection.fetchrow(
+                    """SELECT e.faction_id, f.leader_id FROM game_medical_employees e
+                       JOIN game_factions f ON f.id = e.faction_id
+                       WHERE e.user_id = $1 FOR UPDATE OF f""", actor_id
+                )
+                if actor is None or actor["leader_id"] != actor_id:
+                    return False, "Назначать должности может только лидер фракции больницы."
+                target = await connection.fetchrow(
+                    """SELECT job_title FROM game_medical_employees
+                       WHERE user_id = $1 AND faction_id = $2 FOR UPDATE""",
+                    target_id, actor["faction_id"]
+                )
+                if target is None:
+                    return False, "Игрок не работает в этой медицинской организации."
+                try:
+                    index = titles.index(target["job_title"])
+                except ValueError:
+                    index = 0
+                next_index = index + direction
+                if next_index < 0 or next_index >= len(titles) - 1:
+                    return False, "Достигнут предел должности. Руководство определяется лидерством фракции."
+                await connection.execute(
+                    "UPDATE game_medical_employees SET job_title = $1 WHERE user_id = $2",
+                    titles[next_index], target_id
+                )
+                return True, f"Новая должность: {titles[next_index]}."
+
+    async def list_medical_missions(self, user_id: int) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT m.code, m.title, m.reward_coins, m.reward_xp,
+                      EXISTS (
+                        SELECT 1 FROM game_medical_completions c
+                        WHERE c.user_id = $1 AND c.mission_id = m.id
+                          AND c.completed_on = CURRENT_DATE
+                      ) AS completed_today
+               FROM game_medical_employees e
+               JOIN game_medical_missions m ON m.faction_id = e.faction_id
+               WHERE e.user_id = $1 AND m.active = TRUE ORDER BY m.id""", user_id
+        )
+
+    async def complete_medical_mission(self, user_id: int, code: str) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                mission = await connection.fetchrow(
+                    """SELECT m.id, m.reward_coins, m.reward_xp
+                       FROM game_medical_employees e
+                       JOIN game_medical_missions m ON m.faction_id = e.faction_id
+                       WHERE e.user_id = $1 AND m.code = $2 AND m.active = TRUE
+                       FOR UPDATE OF e""", user_id, code
+                )
+                if mission is None:
+                    return False, "Задание не найдено. Используй /med tasks."
+                inserted = await connection.fetchval(
+                    """INSERT INTO game_medical_completions (user_id, mission_id, completed_on)
+                       VALUES ($1, $2, CURRENT_DATE)
+                       ON CONFLICT DO NOTHING RETURNING user_id""",
+                    user_id, mission["id"]
+                )
+                if inserted is None:
+                    return False, "Это задание уже засчитано сегодня."
+                await connection.execute(
+                    """UPDATE game_players SET coins = coins + $1, xp = xp + $2,
+                       updated_at = NOW() WHERE user_id = $3""",
+                    mission["reward_coins"], mission["reward_xp"], user_id
+                )
+                return True, f"Задание выполнено: +{mission['reward_coins']} монет и +{mission['reward_xp']} XP."
+
+    async def get_medical_roster(self, user_id: int) -> tuple[asyncpg.Record | None, list[asyncpg.Record]]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            center = await connection.fetchrow(
+                """SELECT c.id, c.name, f.name AS faction_name, f.leader_id
+                   FROM game_medical_employees e
+                   JOIN game_medical_centers c ON c.id = e.center_id
+                   JOIN game_factions f ON f.id = e.faction_id
+                   WHERE e.user_id = $1""", user_id
+            )
+            if center is None:
+                return None, []
+            members = await connection.fetch(
+                """SELECT e.user_id, e.job_title, p.username, c.name AS center_name
+                   FROM game_medical_employees e
+                   JOIN game_players p ON p.user_id = e.user_id
+                   JOIN game_medical_centers c ON c.id = e.center_id
+                   WHERE e.faction_id = (
+                       SELECT faction_id FROM game_medical_employees WHERE user_id = $1
+                   )
+                   ORDER BY CASE e.job_title
+                     WHEN 'Главврач' THEN 0 WHEN 'Заместитель главврача' THEN 1
+                     WHEN 'Старший сотрудник' THEN 2 WHEN 'Медицинский сотрудник' THEN 3 ELSE 4 END,
+                     e.joined_at LIMIT 100""", user_id
+            )
+            return center, members
 
 
 database = Database()
