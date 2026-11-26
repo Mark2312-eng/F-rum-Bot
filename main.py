@@ -25,6 +25,7 @@ from city import handle_phone_callback, manage_city_event, show_city, show_event
 from quests import handle_quest_callback, show_quests, show_reputation
 from tournaments import manage_tournament, show_tournaments
 from government import manage_government
+from service import manage_service
 
 load_dotenv()
 
@@ -539,6 +540,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(show_tournaments, Command("tournaments"))
     dispatcher.message.register(manage_tournament, Command("tournament"))
     dispatcher.message.register(manage_government, Command("gov"))
+    dispatcher.message.register(manage_service, Command("service"))
     dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
     dispatcher.message.register(cmd_owner, Command("owner"))
