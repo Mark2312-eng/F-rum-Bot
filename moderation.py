@@ -136,18 +136,36 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
             return
 
 
+async def _get_moderation_target(message: Message, bot: Bot):
+    """Resolve a target from a replied-to message or a numeric Telegram ID."""
+    if message.reply_to_message and message.reply_to_message.from_user:
+        return message.reply_to_message.from_user
+    raw_id = (message.text or "").strip()
+    try:
+        target_id = int(raw_id)
+    except (TypeError, ValueError):
+        return None
+    if target_id <= 0:
+        return None
+    try:
+        member = await bot.get_chat_member(message.chat.id, target_id)
+    except Exception:
+        return None
+    return member.user
+
+
 async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
     if not is_group(message):
         return
     if not await database.is_chat_registered(message.chat.id):
-        await message.reply("Сначала подключи эту группу командой /connect от имени владельца бота.")
+        await message.reply("Сначала подключи эту группу кнопкой «Подключить эту группу» в панели владельца.")
         return
     if not await is_moderator(message, bot, owner_id):
         await message.reply("⛔ Команда доступна только владельцу и администраторам группы.")
         return
-    target = message.reply_to_message.from_user if message.reply_to_message else None
+    target = await _get_moderation_target(message, bot)
     if target is None or target.is_bot:
-        await message.reply("Ответь командой /warn на сообщение участника.")
+        await message.reply("Ответь на сообщение участника или отправь его Telegram ID.")
         return
     if target.id == owner_id or await is_chat_admin(bot, message.chat.id, target.id):
         await message.reply("Нельзя выдать предупреждение владельцу или администратору.")
@@ -192,7 +210,7 @@ async def mute_member(message: Message, bot: Bot, owner_id: int) -> None:
         return
     target = message.reply_to_message.from_user if message.reply_to_message else None
     if target is None or target.is_bot or target.id == owner_id:
-        await message.reply("Ответь командой /mute на сообщение участника.")
+        await message.reply("Ответь на сообщение участника или отправь его Telegram ID.")
         return
     if await is_chat_admin(bot, message.chat.id, target.id):
         await message.reply("Нельзя ограничить администратора группы.")
@@ -223,7 +241,7 @@ async def unmute_member(message: Message, bot: Bot, owner_id: int) -> None:
         return
     target = message.reply_to_message.from_user if message.reply_to_message else None
     if target is None:
-        await message.reply("Ответь командой /unmute на сообщение участника.")
+        await message.reply("Ответь на сообщение участника или отправь его Telegram ID.")
         return
     try:
         await bot.restrict_chat_member(
@@ -284,10 +302,10 @@ def format_moderation_log(events: list) -> str:
 
 async def show_moderation_log(message: Message, bot: Bot, owner_id: int) -> None:
     if not is_group(message):
-        await message.answer("Команда /modlog доступна внутри подключённой группы.")
+        await message.answer("Журнал доступен внутри подключённой группы через панель владельца.")
         return
     if not await database.is_chat_registered(message.chat.id):
-        await message.answer("Сначала подключите группу командой /connect от имени владельца бота.")
+        await message.answer("Сначала подключите группу кнопкой «Подключить эту группу» в панели владельца.")
         return
     if not await is_moderator(message, bot, owner_id):
         await message.answer("⛔ Журнал доступен только владельцу бота и администраторам группы.")
