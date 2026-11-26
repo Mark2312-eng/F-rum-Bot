@@ -287,7 +287,28 @@ async def webapp_api(request: web.Request) -> web.Response:
             family = await database.get_game_family(user_id)
             return web.json_response({"family": dict(family) if family else None})
         if action == "jobs":
-            return web.json_response({"items": rows(await database.get_game_jobs())})
+            employment = await database.get_game_employment(user_id)
+            return web.json_response({"items": rows(await database.get_game_jobs()), "employment": dict(employment) if employment else None})
+        if action == "work_apply":
+            try:
+                job_id = int(payload.get("job_id", 0))
+            except (TypeError, ValueError):
+                job_id = 0
+            ok, message = await database.apply_game_job(user_id, username, job_id)
+            return web.json_response({"ok": ok, "message": message})
+        if action == "work_shift":
+            status, employment, reward = await database.perform_game_shift(user_id)
+            messages = {"ok": f"Смена завершена. Начислено {reward} монет и 35 XP.", "no_job": "Сначала устройся на работу.", "cooldown": "Следующую смену можно выполнить через 10 минут."}
+            return web.json_response({"ok": status == "ok", "status": status, "message": messages.get(status, "Не удалось выполнить смену.")})
+        if action == "work_quit":
+            ok = await database.quit_game_job(user_id)
+            return web.json_response({"ok": ok, "message": "Ты уволился с работы." if ok else "У тебя нет работы."})
+        if action == "leaderboard":
+            return web.json_response({"items": rows(await database.get_game_leaderboard(10))})
+        if action == "achievements":
+            achievements = await database.sync_game_achievements(user_id)
+            labels = {"first_steps": "Первые шаги", "experienced": "Опытный игрок", "wealthy": "Состоятельный житель", "reputation": "Уважаемый житель"}
+            return web.json_response({"items": [{"code": a["achievement_code"], "title": labels.get(a["achievement_code"], a["achievement_code"]), "unlocked_at": a["unlocked_at"].isoformat()} for a in achievements]})
         if action == "quests":
             quests = await database.get_game_quests(user_id)
             return web.json_response({"items": [{"code": q["code"], "title": q["title"], "description": q["description"], "reward_coins": q["reward_coins"], "reward_xp": q["reward_xp"], "reward_reputation": q["reward_reputation"], "ready": q["ready"], "completed": q["completed_at"] is not None} for q in quests]})
