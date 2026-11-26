@@ -197,6 +197,22 @@ class Database:
                     ('collector', 'Собиратель', 'Купи хотя бы один предмет в игровом магазине.', 'item', 75, 60, 1),
                     ('team_player', 'Командный игрок', 'Вступи в одну из игровых фракций.', 'faction', 100, 80, 3)
                 ON CONFLICT (code) DO NOTHING;
+                CREATE TABLE IF NOT EXISTS game_tournaments (
+                    id BIGSERIAL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    organizer_id BIGINT NOT NULL REFERENCES game_players(user_id),
+                    prize_coins INTEGER NOT NULL CHECK (prize_coins BETWEEN 0 AND 5000),
+                    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'finished')),
+                    winner_family_id BIGINT REFERENCES game_families(id),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    finished_at TIMESTAMPTZ
+                );
+                CREATE TABLE IF NOT EXISTS game_tournament_families (
+                    tournament_id BIGINT NOT NULL REFERENCES game_tournaments(id) ON DELETE CASCADE,
+                    family_id BIGINT NOT NULL REFERENCES game_families(id) ON DELETE CASCADE,
+                    joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (tournament_id, family_id)
+                );
             """)
 
     async def close(self) -> None:
@@ -847,6 +863,107 @@ class Database:
             user_id,
         )
 
+
+
+    async def create_game_tournament(self, user_id: int, name: str, prize_coins: int) -> tuple[str, int]:
+        clean_name = " ".join(name.split()).strip()
+        if not 3 <= len(clean_name) <= 48 or not 0 <= prize_coins <= 5000:
+            return "invalid", 0
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                family = await connection.fetchrow(
+                    """SELECT f.id FROM game_families f
+                       JOIN game_family_members m ON m.family_id = f.id
+                       WHERE m.user_id = $1 AND m.role = 'owner'""", user_id
+                )
+                if family is None:
+                    return "not_owner", 0
+                tournament_id = await connection.fetchval(
+                    """INSERT INTO game_tournaments (name, organizer_id, prize_coins)
+                       VALUES ($1, $2, $3) RETURNING id""", clean_name, user_id, prize_coins
+                )
+                await connection.execute(
+                    "INSERT INTO game_tournament_families (tournament_id, family_id) VALUES ($1, $2)",
+                    tournament_id, family["id"]
+                )
+                return "ok", int(tournament_id)
+
+    async def join_game_tournament(self, user_id: int, tournament_id: int) -> str:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                family = await connection.fetchrow(
+                    """SELECT f.id FROM game_families f
+                       JOIN game_family_members m ON m.family_id = f.id
+                       WHERE m.user_id = $1 AND m.role = 'owner'""", user_id
+                )
+                if family is None:
+                    return "not_owner"
+                tournament = await connection.fetchrow(
+                    "SELECT id, status FROM game_tournaments WHERE id = $1 FOR UPDATE", tournament_id
+                )
+                if tournament is None:
+                    return "missing"
+                if tournament["status"] != "open":
+                    return "closed"
+                result = await connection.execute(
+                    """INSERT INTO game_tournament_families (tournament_id, family_id)
+                       VALUES ($1, $2) ON CONFLICT DO NOTHING""", tournament_id, family["id"]
+                )
+                return "joined" if result.endswith("1") else "already"
+
+    async def finish_game_tournament(self, user_id: int, tournament_id: int, winner_family_id: int) -> tuple[str, int]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                tournament = await connection.fetchrow(
+                    "SELECT * FROM game_tournaments WHERE id = $1 FOR UPDATE", tournament_id
+                )
+                if tournament is None:
+                    return "missing", 0
+                if int(tournament["organizer_id"]) != user_id:
+                    return "forbidden", 0
+                if tournament["status"] != "open":
+                    return "finished", 0
+                enrolled = await connection.fetchval(
+                    """SELECT EXISTS (SELECT 1 FROM game_tournament_families
+                       WHERE tournament_id = $1 AND family_id = $2)""", tournament_id, winner_family_id
+                )
+                if not enrolled:
+                    return "not_enrolled", 0
+                members = await connection.fetch(
+                    "SELECT user_id FROM game_family_members WHERE family_id = $1 ORDER BY user_id",
+                    winner_family_id
+                )
+                if not members:
+                    return "empty", 0
+                prize = int(tournament["prize_coins"])
+                share, remainder = divmod(prize, len(members))
+                for index, member in enumerate(members):
+                    await connection.execute(
+                        "UPDATE game_players SET coins = coins + $2, updated_at = NOW() WHERE user_id = $1",
+                        int(member["user_id"]), share + (remainder if index == 0 else 0)
+                    )
+                await connection.execute(
+                    """UPDATE game_tournaments SET status = 'finished',
+                       winner_family_id = $2, finished_at = NOW() WHERE id = $1""",
+                    tournament_id, winner_family_id
+                )
+                return "ok", prize
+
+    async def get_game_tournaments(self, limit: int = 10) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT t.id, t.name, t.prize_coins, t.status, t.winner_family_id,
+                      f.name AS winner_name, COUNT(tf.family_id)::int AS family_count,
+                      t.organizer_id
+               FROM game_tournaments t
+               LEFT JOIN game_families f ON f.id = t.winner_family_id
+               LEFT JOIN game_tournament_families tf ON tf.tournament_id = t.id
+               GROUP BY t.id, f.name
+               ORDER BY (t.status = 'open') DESC, t.created_at DESC LIMIT $1""",
+            max(1, min(int(limit), 20))
+        )
 
 
 database = Database()
