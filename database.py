@@ -339,6 +339,71 @@ class Database:
                     ('Механик', 'Обслуживание и ремонт транспорта.', 'Стажёр', 100),
                     ('Работник мэрии', 'Помощь городским службам.', 'Стажёр', 110)
                 ON CONFLICT (name) DO NOTHING;
+                CREATE TABLE IF NOT EXISTS game_transport_routes (
+                    id BIGSERIAL PRIMARY KEY,
+                    route_code TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    vehicle_type TEXT NOT NULL DEFAULT 'Автобус',
+                    fare INTEGER NOT NULL CHECK (fare > 0),
+                    interval_minutes INTEGER NOT NULL CHECK (interval_minutes > 0),
+                    active BOOLEAN NOT NULL DEFAULT TRUE
+                );
+                CREATE TABLE IF NOT EXISTS game_transport_stops (
+                    id BIGSERIAL PRIMARY KEY,
+                    stop_code TEXT NOT NULL UNIQUE,
+                    name TEXT NOT NULL,
+                    district TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS game_transport_route_stops (
+                    route_id BIGINT NOT NULL REFERENCES game_transport_routes(id) ON DELETE CASCADE,
+                    stop_id BIGINT NOT NULL REFERENCES game_transport_stops(id) ON DELETE CASCADE,
+                    stop_order INTEGER NOT NULL CHECK (stop_order > 0),
+                    PRIMARY KEY (route_id, stop_id),
+                    UNIQUE (route_id, stop_order)
+                );
+                CREATE TABLE IF NOT EXISTS game_transport_tickets (
+                    user_id BIGINT PRIMARY KEY REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS game_transport_rides (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    route_id BIGINT NOT NULL REFERENCES game_transport_routes(id),
+                    from_stop_id BIGINT NOT NULL REFERENCES game_transport_stops(id),
+                    to_stop_id BIGINT NOT NULL REFERENCES game_transport_stops(id),
+                    fare_paid INTEGER NOT NULL CHECK (fare_paid > 0),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CHECK (from_stop_id <> to_stop_id)
+                );
+                CREATE INDEX IF NOT EXISTS game_transport_rides_user_idx
+                    ON game_transport_rides (user_id, created_at DESC);
+                INSERT INTO game_transport_routes
+                    (route_code, name, vehicle_type, fare, interval_minutes)
+                VALUES
+                    ('A1', 'Центральный маршрут', 'Автобус', 20, 15),
+                    ('A2', 'Северный маршрут', 'Автобус', 20, 20),
+                    ('T1', 'Городской трамвай', 'Трамвай', 20, 12)
+                ON CONFLICT (route_code) DO NOTHING;
+                INSERT INTO game_transport_stops (stop_code, name, district)
+                VALUES
+                    ('central', 'Центральная площадь', 'Центр'),
+                    ('station', 'Железнодорожный вокзал', 'Центр'),
+                    ('hospital', 'Городская больница', 'Северный район'),
+                    ('university', 'Городской университет', 'Центр'),
+                    ('park', 'Городской парк', 'Северный район'),
+                    ('airport', 'Аэропорт', 'Западный район')
+                ON CONFLICT (stop_code) DO NOTHING;
+                INSERT INTO game_transport_route_stops (route_id, stop_id, stop_order)
+                SELECT r.id, s.id, x.stop_order
+                FROM (VALUES
+                    ('A1', 'central', 1), ('A1', 'station', 2), ('A1', 'university', 3), ('A1', 'hospital', 4),
+                    ('A2', 'airport', 1), ('A2', 'park', 2), ('A2', 'hospital', 3), ('A2', 'central', 4),
+                    ('T1', 'station', 1), ('T1', 'central', 2), ('T1', 'park', 3), ('T1', 'university', 4)
+                ) AS x(route_code, stop_code, stop_order)
+                JOIN game_transport_routes r ON r.route_code = x.route_code
+                JOIN game_transport_stops s ON s.stop_code = x.stop_code
+                ON CONFLICT (route_id, stop_id) DO NOTHING;
                 CREATE TABLE IF NOT EXISTS game_shop_items (
                     code TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
                     price INTEGER NOT NULL CHECK (price >= 0), active BOOLEAN NOT NULL DEFAULT TRUE
@@ -2023,6 +2088,130 @@ class Database:
                    ORDER BY s.enrolled_at LIMIT 100""", institution["id"]
             )
             return institution, students
+
+
+    async def list_transport_routes(self) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT r.id, r.route_code, r.name, r.vehicle_type, r.fare,
+                      r.interval_minutes, COUNT(rs.stop_id)::int AS stops
+               FROM game_transport_routes r
+               LEFT JOIN game_transport_route_stops rs ON rs.route_id = r.id
+               WHERE r.active = TRUE
+               GROUP BY r.id ORDER BY r.id"""
+        )
+
+    async def list_transport_stops(self, route_id: int) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT s.id, s.name, s.district, rs.stop_order
+               FROM game_transport_route_stops rs
+               JOIN game_transport_stops s ON s.id = rs.stop_id
+               JOIN game_transport_routes r ON r.id = rs.route_id
+               WHERE rs.route_id = $1 AND r.active = TRUE
+               ORDER BY rs.stop_order""", route_id
+        )
+
+    async def get_transport_ticket_count(self, user_id: int) -> int:
+        return int(await self._require_pool().fetchval(
+            "SELECT quantity FROM game_transport_tickets WHERE user_id = $1", user_id
+        ) or 0)
+
+    async def buy_transport_tickets(self, user_id: int, username: str, quantity: int) -> tuple[bool, str]:
+        if not 1 <= quantity <= 10:
+            return False, "За одну покупку можно приобрести от 1 до 10 билетов."
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                    user_id, username[:64]
+                )
+                player = await connection.fetchrow(
+                    "SELECT coins FROM game_players WHERE user_id = $1 FOR UPDATE", user_id
+                )
+                price = quantity * 20
+                if int(player["coins"]) < price:
+                    return False, f"Недостаточно монет. Нужно {price}."
+                await connection.execute(
+                    "UPDATE game_players SET coins = coins - $2, updated_at = NOW() WHERE user_id = $1",
+                    user_id, price
+                )
+                await connection.execute(
+                    """INSERT INTO game_transport_tickets (user_id, quantity)
+                       VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE
+                       SET quantity = game_transport_tickets.quantity + EXCLUDED.quantity,
+                           updated_at = NOW()""", user_id, quantity
+                )
+                return True, f"Куплено билетов: {quantity}. Списано {price} монет."
+
+    async def ride_city_transport(self, user_id: int, route_id: int, from_stop_id: int, to_stop_id: int) -> tuple[bool, str]:
+        if from_stop_id == to_stop_id:
+            return False, "Остановки отправления и назначения должны различаться."
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                route = await connection.fetchrow(
+                    """SELECT id, name, fare FROM game_transport_routes
+                       WHERE id = $1 AND active = TRUE FOR UPDATE""", route_id
+                )
+                if route is None:
+                    return False, "Маршрут не найден. Используй /bus routes."
+                stops = await connection.fetchval(
+                    """SELECT COUNT(*) FROM game_transport_route_stops
+                       WHERE route_id = $1 AND stop_id = ANY($2::BIGINT[])""",
+                    route_id, [from_stop_id, to_stop_id]
+                )
+                if stops != 2:
+                    return False, "Обе остановки должны входить в выбранный маршрут."
+                ordered = await connection.fetchval(
+                    """SELECT BOOL_AND(a.stop_order < b.stop_order)
+                       FROM game_transport_route_stops a
+                       JOIN game_transport_route_stops b ON b.route_id = a.route_id
+                       WHERE a.route_id = $1 AND a.stop_id = $2 AND b.stop_id = $3""",
+                    route_id, from_stop_id, to_stop_id
+                )
+                if not ordered:
+                    return False, "Выбери остановки в порядке движения маршрута."
+                ticket = await connection.fetchrow(
+                    "SELECT quantity FROM game_transport_tickets WHERE user_id = $1 FOR UPDATE",
+                    user_id
+                )
+                if ticket is None or ticket["quantity"] < 1:
+                    return False, "Нет билетов. Купи их командой /bus ticket 1."
+                await connection.execute(
+                    """UPDATE game_transport_tickets
+                       SET quantity = quantity - 1, updated_at = NOW()
+                       WHERE user_id = $1""", user_id
+                )
+                await connection.execute(
+                    """INSERT INTO game_transport_rides
+                       (user_id, route_id, from_stop_id, to_stop_id, fare_paid)
+                       VALUES ($1, $2, $3, $4, $5)""",
+                    user_id, route_id, from_stop_id, to_stop_id, route["fare"]
+                )
+                await connection.execute(
+                    "UPDATE game_players SET xp = xp + 5, updated_at = NOW() WHERE user_id = $1",
+                    user_id
+                )
+                names = await connection.fetchrow(
+                    """SELECT a.name AS from_name, b.name AS to_name
+                       FROM game_transport_stops a, game_transport_stops b
+                       WHERE a.id = $1 AND b.id = $2""", from_stop_id, to_stop_id
+                )
+                return True, f"Поездка «{route['name']}»: {names['from_name']} → {names['to_name']}. +5 XP."
+
+    async def get_transport_ride_history(self, user_id: int) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT r.name AS route_name, a.name AS from_name, b.name AS to_name,
+                      t.created_at
+               FROM game_transport_rides t
+               JOIN game_transport_routes r ON r.id = t.route_id
+               JOIN game_transport_stops a ON a.id = t.from_stop_id
+               JOIN game_transport_stops b ON b.id = t.to_stop_id
+               WHERE t.user_id = $1 ORDER BY t.created_at DESC LIMIT 10""", user_id
+        )
+
 
 
 database = Database()
