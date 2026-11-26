@@ -1352,4 +1352,34 @@ class Database:
                 return True, f"Зарплата начислена: {salary} игровых монет."
 
 
+    async def appoint_government_head(self, actor_id: int, target_id: int, department_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                leader = await connection.fetchval(
+                    """SELECT f.id FROM game_factions f
+                       JOIN game_faction_members m ON m.faction_id = f.id
+                       WHERE f.name = 'Правительство Москвы' AND f.leader_id = $1
+                         AND m.user_id = $1 FOR UPDATE OF f""", actor_id
+                )
+                if leader is None:
+                    return False, "Назначать начальников может только лидер Правительства Москвы."
+                target = await connection.fetchrow(
+                    """SELECT e.user_id FROM game_government_employees e
+                       WHERE e.user_id = $1 AND e.department_id = $2 FOR UPDATE""",
+                    target_id, department_id
+                )
+                if target is None:
+                    return False, "Игрок должен работать в указанном отделе."
+                await connection.execute(
+                    """UPDATE game_government_employees SET position = 'Сотрудник'
+                       WHERE department_id = $1 AND position = 'Начальник отдела'""", department_id
+                )
+                await connection.execute(
+                    """UPDATE game_government_employees SET position = 'Начальник отдела'
+                       WHERE user_id = $1 AND department_id = $2""", target_id, department_id
+                )
+                return True, "Начальник отдела назначен."
+
+
 database = Database()
