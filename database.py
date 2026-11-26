@@ -963,6 +963,27 @@ class Database:
         )
 
 
+    async def get_game_family_members(self, family_id: int) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT m.user_id, p.username, m.role, m.joined_at
+               FROM game_family_members m
+               LEFT JOIN game_players p ON p.user_id = m.user_id
+               WHERE m.family_id = $1
+               ORDER BY CASE m.role WHEN 'owner' THEN 0 ELSE 1 END, m.joined_at ASC""",
+            family_id,
+        )
+
+    async def get_game_family_catalog(self, limit: int = 30) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT f.id, f.name, COUNT(m.user_id)::int AS members
+               FROM game_families f
+               LEFT JOIN game_family_members m ON m.family_id = f.id
+               GROUP BY f.id
+               ORDER BY members DESC, f.name ASC
+               LIMIT $1""",
+            max(1, min(int(limit), 50)),
+        )
+
     async def get_game_shop_items(self) -> list[asyncpg.Record]:
         return await self._require_pool().fetch(
             "SELECT code, name, description, price FROM game_shop_items WHERE active = TRUE ORDER BY price"
