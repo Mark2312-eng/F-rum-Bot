@@ -1,16 +1,21 @@
 """Telegram bot for querying player information on a XenForo forum."""
 
 import asyncio
+import hashlib
+import hmac
+import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 from html import escape
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit
 
 import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 from aiohttp import web
 from dotenv import load_dotenv
 
@@ -164,6 +169,9 @@ def build_main_keyboard(forum_url: str, is_owner: bool = False) -> InlineKeyboar
     ]
     if is_owner:
         rows.append([InlineKeyboardButton(text="⚙️ Панель владельца", callback_data="owner_panel")])
+    webapp_url = os.getenv("WEBAPP_URL", "https://f-rum-bot.onrender.com").strip()
+    if webapp_url.startswith("https://"):
+        rows.append([InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=webapp_url))])
     rows.append([InlineKeyboardButton(text="🌐 Открыть форум", url=forum_url)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -203,10 +211,209 @@ async def health_check(_request: web.Request) -> web.Response:
     return web.Response(text="Telegram Bot is running!")
 
 
+def validate_telegram_init_data(init_data: str, bot_token: str) -> dict | None:
+    """Validate Telegram Mini App initData using Telegram's HMAC procedure."""
+    if not init_data or len(init_data) > 8192 or not bot_token:
+        return None
+    try:
+        values = dict(parse_qsl(init_data, keep_blank_values=True, strict_parsing=True))
+        received_hash = values.pop("hash", "")
+        auth_date = int(values.get("auth_date", "0"))
+        if not received_hash or abs(int(time.time()) - auth_date) > 86400:
+            return None
+        check_string = "\n".join(f"{key}={value}" for key, value in sorted(values.items()))
+        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+        expected_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected_hash, received_hash):
+            return None
+        user = json.loads(values.get("user", "{}"))
+        if not isinstance(user, dict) or not isinstance(user.get("id"), int):
+            return None
+        return user
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+async def webapp_index(_request: web.Request) -> web.StreamResponse:
+    """Serve the Telegram Mini App frontend."""
+    page = Path(__file__).parent / "webapp" / "index.html"
+    if not page.is_file():
+        return web.Response(status=404, text="Mini App frontend not found")
+    return web.FileResponse(page)
+
+
+async def webapp_api(request: web.Request) -> web.Response:
+    """Authenticated Mini App API for game data and safe player actions."""
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        return web.json_response({"error": "Некорректный запрос"}, status=400)
+    if not isinstance(payload, dict):
+        return web.json_response({"error": "Некорректный запрос"}, status=400)
+    user = validate_telegram_init_data(
+        str(payload.get("init_data", "")),
+        os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
+    )
+    if user is None:
+        return web.json_response({"error": "Не удалось подтвердить Telegram. Откройте приложение из бота."}, status=401)
+    user_id = user["id"]
+    username = str(user.get("username") or user.get("first_name") or "Игрок")[:64]
+    action = str(payload.get("action", "profile"))
+    def rows(data):
+        return [dict(item) for item in data]
+    try:
+        if action in {"profile", "me"}:
+            profile = await database.get_game_profile(user_id, username)
+            achievements = await database.sync_game_achievements(user_id)
+            return web.json_response({"user": {"id": user_id, "first_name": user.get("first_name", ""), "username": user.get("username", "")},
+                "profile": {"coins": profile["coins"], "xp": profile["xp"], "reputation": profile["reputation"], "daily_streak": profile["daily_streak"], "level": int(profile["xp"]) // 100 + 1},
+                "achievements": len(achievements)})
+        if action == "daily":
+            profile, reward, claimed = await database.claim_game_daily(user_id, username)
+            return web.json_response({"ok": claimed, "message": f"Получено: +{reward} монет и +50 XP." if claimed else "Ежедневная награда уже получена.", "profile": {"coins": profile["coins"], "xp": profile["xp"], "reputation": profile["reputation"], "daily_streak": profile["daily_streak"]}})
+        if action == "shop":
+            return web.json_response({"items": rows(await database.get_game_shop_items())})
+        if action == "inventory":
+            return web.json_response({"items": rows(await database.get_game_inventory(user_id))})
+        if action == "property":
+            owned = await database.get_game_property(user_id)
+            return web.json_response({"owned": ({"id": owned["id"], "property_type": owned["property_type"], "name": owned["name"]} if owned else None), "items": rows(await database.get_game_property_catalog())})
+        if action == "garage":
+            return web.json_response({"owned": [{"id": v["id"], "name": v["name"], "description": v["description"]} for v in await database.get_game_vehicles(user_id)], "items": rows(await database.get_game_vehicle_catalog())})
+        if action == "factions":
+            current = await database.get_game_faction(user_id)
+            return web.json_response({"items": rows(await database.get_game_factions()), "current": dict(current) if current else None})
+        if action == "family":
+            family = await database.get_game_family(user_id)
+            return web.json_response({"family": dict(family) if family else None})
+        if action == "jobs":
+            employment = await database.get_game_employment(user_id)
+            return web.json_response({"items": rows(await database.get_game_jobs()), "employment": ({"job_id": employment["job_id"], "job_name": employment["job_name"], "description": employment["description"], "reward_coins": employment["reward_coins"], "rank_name": employment["rank_name"], "shifts_completed": employment["shifts_completed"], "last_shift_at": employment["last_shift_at"].isoformat() if employment["last_shift_at"] else None} if employment else None)})
+        if action == "work_apply":
+            try:
+                job_id = int(payload.get("job_id", 0))
+            except (TypeError, ValueError):
+                job_id = 0
+            ok, message = await database.apply_game_job(user_id, username, job_id)
+            return web.json_response({"ok": ok, "message": message})
+        if action == "work_shift":
+            status, employment, reward = await database.perform_game_shift(user_id)
+            messages = {"ok": f"Смена завершена. Начислено {reward} монет и 35 XP.", "no_job": "Сначала устройся на работу.", "cooldown": "Следующую смену можно выполнить через 10 минут."}
+            return web.json_response({"ok": status == "ok", "status": status, "message": messages.get(status, "Не удалось выполнить смену.")})
+        if action == "work_quit":
+            ok = await database.quit_game_job(user_id)
+            return web.json_response({"ok": ok, "message": "Ты уволился с работы." if ok else "У тебя нет работы."})
+        if action == "leaderboard":
+            return web.json_response({"items": rows(await database.get_game_leaderboard(10))})
+        if action == "achievements":
+            achievements = await database.sync_game_achievements(user_id)
+            labels = {"first_steps": "Первые шаги", "experienced": "Опытный игрок", "wealthy": "Состоятельный житель", "reputation": "Уважаемый житель"}
+            return web.json_response({"items": [{"code": a["achievement_code"], "title": labels.get(a["achievement_code"], a["achievement_code"]), "unlocked_at": a["unlocked_at"].isoformat()} for a in achievements]})
+        if action == "quests":
+            quests = await database.get_game_quests(user_id)
+            return web.json_response({"items": [{"code": q["code"], "title": q["title"], "description": q["description"], "reward_coins": q["reward_coins"], "reward_xp": q["reward_xp"], "reward_reputation": q["reward_reputation"], "ready": q["ready"], "completed": q["completed_at"] is not None} for q in quests]})
+        if action == "claim_quest":
+            code = str(payload.get("code", ""))[:64]
+            status, coins, xp, reputation = await database.claim_game_quest(user_id, username, code)
+            messages = {"ok": f"Награда получена: +{coins} монет, +{xp} XP, +{reputation} репутации.", "not_ready": "Сначала выполни условие задания.", "claimed": "Это задание уже выполнено.", "missing": "Задание не найдено."}
+            return web.json_response({"ok": status == "ok", "status": status, "message": messages.get(status, "Не удалось получить награду.")})
+        if action == "reputation":
+            player = await database.get_game_reputation(user_id)
+            if player is None:
+                return web.json_response({"player": None})
+            score = int(player["reputation"])
+            title = "Легенда города" if score >= 50 else "Уважаемый житель" if score >= 25 else "Известный житель" if score >= 10 else "Активный житель" if score >= 3 else "Новичок"
+            return web.json_response({"player": {"username": player["username"], "xp": player["xp"], "coins": player["coins"], "reputation": score, "title": title}})
+        if action in {"events", "join_event", "leave_event"}:
+            events = [{"code": "fair", "title": "Городская ярмарка", "description": "Знакомство с городскими организациями и торговыми точками.", "starts_in_hours": 14}, {"code": "open_day", "title": "День открытых дверей", "description": "Презентации игровых фракций и профессий.", "starts_in_hours": 38}, {"code": "cleanup", "title": "Городской субботник", "description": "Совместное общественное мероприятие игроков.", "starts_in_hours": 62}]
+            if action == "join_event":
+                code = str(payload.get("code", ""))[:32]
+                status = await database.signup_city_event(user_id, username, code)
+                return web.json_response({"ok": status == "joined", "status": status, "message": {"joined": "Запись на событие подтверждена.", "already": "Ты уже записан на это событие.", "missing": "Неизвестное событие."}[status]})
+            if action == "leave_event":
+                code = str(payload.get("code", ""))[:32]
+                status = await database.leave_city_event(user_id, code)
+                return web.json_response({"ok": status == "left", "status": status, "message": {"left": "Запись отменена.", "not_joined": "Ты не записан на это событие.", "missing": "Неизвестное событие."}[status]})
+            signed = {r["event_code"] for r in await database.get_user_city_event_signups(user_id)}
+            return web.json_response({"items": [{**event, "joined": event["code"] in signed} for event in events]})
+        if action == "tournaments":
+            items = rows(await database.get_game_tournaments())
+            return web.json_response({"items": items})
+        if action == "join_tournament":
+            try:
+                tournament_id = int(payload.get("tournament_id", 0))
+            except (TypeError, ValueError):
+                tournament_id = 0
+            status = await database.join_game_tournament(user_id, tournament_id)
+            messages = {"joined": "Семья зарегистрирована на турнир.", "already": "Семья уже участвует.", "not_owner": "Записать семью может только её владелец.", "missing": "Турнир не найден.", "closed": "Регистрация закрыта."}
+            return web.json_response({"ok": status == "joined", "status": status, "message": messages.get(status, "Не удалось записаться.")})
+        if action == "transport":
+            routes = rows(await database.list_transport_routes())
+            return web.json_response({"routes": routes, "tickets": await database.get_transport_ticket_count(user_id), "history": [{"route": h["route_name"], "from": h["from_name"], "to": h["to_name"], "date": h["created_at"].isoformat()} for h in await database.get_transport_ride_history(user_id)]})
+        if action == "transport_stops":
+            try:
+                route_id = int(payload.get("route_id", 0))
+            except (TypeError, ValueError):
+                route_id = 0
+            stops = rows(await database.list_transport_stops(route_id))
+            return web.json_response({"items": stops})
+        if action == "buy_tickets":
+            try:
+                quantity = int(payload.get("quantity", 1))
+            except (TypeError, ValueError):
+                quantity = 0
+            ok, message = await database.buy_transport_tickets(user_id, username, quantity)
+            return web.json_response({"ok": ok, "message": message, "tickets": await database.get_transport_ticket_count(user_id)})
+        if action == "ride_transport":
+            try:
+                route_id = int(payload.get("route_id", 0))
+                from_stop = int(payload.get("from_stop_id", 0))
+                to_stop = int(payload.get("to_stop_id", 0))
+            except (TypeError, ValueError):
+                return web.json_response({"error": "Некорректные остановки."}, status=400)
+            ok, message = await database.ride_city_transport(user_id, route_id, from_stop, to_stop)
+            return web.json_response({"ok": ok, "message": message, "tickets": await database.get_transport_ticket_count(user_id)})
+        if action == "buy":
+            kind, code = str(payload.get("kind", "")), str(payload.get("code", ""))
+            if not code or len(code) > 64:
+                return web.json_response({"error": "Некорректный товар."}, status=400)
+            methods = {"item": database.buy_game_item, "property": database.buy_game_property, "vehicle": database.buy_game_vehicle}
+            if kind not in methods:
+                return web.json_response({"error": "Неизвестный тип покупки."}, status=400)
+            status, price = await methods[kind](user_id, username, code)
+            messages = {"ok": f"Покупка выполнена за {price} монет.", "funds": f"Недостаточно монет. Цена: {price}.", "owned": "У тебя уже есть недвижимость.", "limit": "Достигнут лимит транспорта.", "missing": "Товар больше недоступен."}
+            return web.json_response({"ok": status == "ok", "message": messages.get(status, "Покупка не выполнена."), "status": status})
+        if action == "join_faction":
+            try:
+                faction_id = int(payload.get("faction_id", 0))
+            except (TypeError, ValueError):
+                faction_id = 0
+            ok, message = await database.join_game_faction(user_id, username, faction_id)
+            return web.json_response({"ok": ok, "message": message})
+        if action == "leave_faction":
+            ok = await database.leave_game_faction(user_id)
+            return web.json_response({"ok": ok, "message": "Ты покинул фракцию." if ok else "Ты не состоишь во фракции."})
+        if action == "create_family":
+            name = str(payload.get("name", "")).strip()
+            if not 3 <= len(name) <= 32:
+                return web.json_response({"error": "Название семьи должно содержать от 3 до 32 символов."}, status=400)
+            ok, message = await database.create_game_family(user_id, username, name)
+            return web.json_response({"ok": ok, "message": message})
+        if action == "leave_family":
+            ok, message = await database.leave_game_family(user_id)
+            return web.json_response({"ok": ok, "message": message})
+        return web.json_response({"error": "Неизвестное действие."}, status=400)
+    except Exception:
+        LOGGER.exception("Mini App API action failed: %s", action)
+        return web.json_response({"error": "Не удалось выполнить действие. Попробуйте позже."}, status=500)
+
+
 async def start_web_server(port: int) -> web.AppRunner:
-    """Start the health server or raise immediately if binding fails."""
-    app = web.Application()
-    app.router.add_get("/", health_check)
+    """Start the health server and Telegram Mini App routes."""
+    app = web.Application(client_max_size=16 * 1024)
+    app.router.add_get("/", webapp_index)
+    app.router.add_get("/health", health_check)
+    app.router.add_post("/api/webapp", webapp_api)
     runner = web.AppRunner(app, access_log=LOGGER)
     await runner.setup()
 
