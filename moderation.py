@@ -1,8 +1,4 @@
-"""Basic Telegram group moderation for F-rum-Bot.
-
-The first release keeps counters in memory. Persistent storage and richer owner
-controls are intentionally deferred until a durable database is configured.
-"""
+"""Telegram group moderation backed by persistent PostgreSQL state."""
 import re
 import time
 from collections import defaultdict, deque
@@ -211,11 +207,11 @@ async def unmute_member(message: Message, bot: Bot, owner_id: int) -> None:
 
 def owner_summary(owner_id: int, chat_count: int) -> str:
     return (
-        "⚙️ <b>Панель владельца</b>\\n\\n"
-        f"🆔 Ваш Telegram ID: <code>{owner_id}</code>\\n"
-        f"👥 Подключено групп: <b>{chat_count}</b>\\n\\n"
-        "Команды:\\n"
-        "/myid — показать ваш ID\\n"
-        "/chats — показать число подключённых групп\\n"
+        "⚙️ <b>Панель владельца</b>\n\n"
+        f"🆔 Ваш Telegram ID: <code>{owner_id}</code>\n"
+        f"👥 Подключено групп: <b>{chat_count}</b>\n\n"
+        "Команды:\n"
+        "/myid — показать ваш ID\n"
+        "/chats — показать число подключённых групп\n"
         "В группе: /connect, /warn, /mute, /unmute — ответом на сообщение."
     )
