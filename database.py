@@ -69,6 +69,30 @@ class Database:
             chat_id,
         )
 
+    async def get_chat_settings(self, chat_id: int) -> dict[str, str]:
+        pool = self._require_pool()
+        row = await pool.fetchrow(
+            "SELECT moderation_mode, link_policy FROM registered_chats WHERE chat_id = $1",
+            chat_id,
+        )
+        if row is None:
+            raise ValueError("Chat is not registered")
+        return {"moderation_mode": row["moderation_mode"], "link_policy": row["link_policy"]}
+
+    async def update_chat_setting(self, chat_id: int, setting: str, value: str) -> None:
+        allowed = {
+            "moderation_mode": {"off", "balanced", "strict"},
+            "link_policy": {"allow", "block", "mute"},
+        }
+        if setting not in allowed or value not in allowed[setting]:
+            raise ValueError("Unsupported moderation setting")
+        pool = self._require_pool()
+        column = setting
+        await pool.execute(
+            f"UPDATE registered_chats SET {column} = $2 WHERE chat_id = $1",
+            chat_id, value,
+        )
+
     async def registered_chat_count(self) -> int:
         pool = self._require_pool()
         return int(await pool.fetchval("SELECT COUNT(*) FROM registered_chats"))
