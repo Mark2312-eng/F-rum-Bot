@@ -116,6 +116,15 @@ class Database:
                     shifts_completed INTEGER NOT NULL DEFAULT 0 CHECK (shifts_completed >= 0),
                     hired_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+                ALTER TABLE game_employment
+                    ADD COLUMN IF NOT EXISTS last_shift_at TIMESTAMPTZ;
+                INSERT INTO game_jobs (name, description, starting_rank, reward_coins)
+                VALUES
+                    ('Курьер', 'Доставка заказов по городу.', 'Стажёр', 75),
+                    ('Таксист', 'Перевозка пассажиров по городу.', 'Стажёр', 90),
+                    ('Механик', 'Обслуживание и ремонт транспорта.', 'Стажёр', 100),
+                    ('Работник мэрии', 'Помощь городским службам.', 'Стажёр', 110)
+                ON CONFLICT (name) DO NOTHING;
                 CREATE TABLE IF NOT EXISTS game_events (
                     id BIGSERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
                     starts_at TIMESTAMPTZ NOT NULL, ends_at TIMESTAMPTZ,
@@ -308,6 +317,107 @@ class Database:
                WHERE user_id = $1 ORDER BY unlocked_at ASC""",
             user_id,
         )
+
+
+    async def get_game_jobs(self) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT id, name, description, starting_rank, reward_coins
+               FROM game_jobs WHERE active = TRUE ORDER BY id"""
+        )
+
+    async def get_game_employment(self, user_id: int) -> asyncpg.Record | None:
+        return await self._require_pool().fetchrow(
+            """SELECT e.job_id, j.name AS job_name, j.description, j.reward_coins,
+                      e.rank_name, e.shifts_completed, e.last_shift_at
+               FROM game_employment e
+               JOIN game_jobs j ON j.id = e.job_id
+               WHERE e.user_id = $1""",
+            user_id,
+        )
+
+    async def apply_game_job(self, user_id: int, username: str, job_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE
+                       SET username = CASE WHEN EXCLUDED.username <> '' THEN EXCLUDED.username
+                                           ELSE game_players.username END""",
+                    user_id, username[:64],
+                )
+                existing = await connection.fetchval(
+                    "SELECT job_id FROM game_employment WHERE user_id = $1 FOR UPDATE", user_id
+                )
+                if existing is not None:
+                    return False, "У тебя уже есть работа. Сначала уволься."
+                job = await connection.fetchrow(
+                    "SELECT id, name, starting_rank FROM game_jobs WHERE id = $1 AND active = TRUE",
+                    job_id,
+                )
+                if job is None:
+                    return False, "Эта вакансия больше недоступна."
+                await connection.execute(
+                    """INSERT INTO game_employment (user_id, job_id, rank_name)
+                       VALUES ($1, $2, $3)""",
+                    user_id, job["id"], job["starting_rank"],
+                )
+                return True, f"Ты устроился на работу: {job['name']}."
+
+    async def perform_game_shift(self, user_id: int) -> tuple[str, asyncpg.Record | None, int]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                employment = await connection.fetchrow(
+                    """SELECT e.job_id, e.rank_name, e.shifts_completed, e.last_shift_at,
+                              j.name AS job_name, j.reward_coins
+                       FROM game_employment e JOIN game_jobs j ON j.id = e.job_id
+                       WHERE e.user_id = $1 FOR UPDATE OF e""",
+                    user_id,
+                )
+                if employment is None:
+                    return "no_job", None, 0
+                cooldown = await connection.fetchval(
+                    """SELECT $1::timestamptz IS NOT NULL
+                              AND $1::timestamptz > NOW() - INTERVAL '10 minutes'""",
+                    employment["last_shift_at"],
+                )
+                if cooldown:
+                    return "cooldown", employment, 0
+                shifts = int(employment["shifts_completed"]) + 1
+                reward = int(employment["reward_coins"])
+                rank = employment["rank_name"]
+                if shifts >= 20:
+                    rank = "Руководитель"
+                elif shifts >= 10:
+                    rank = "Старший сотрудник"
+                elif shifts >= 5:
+                    rank = "Опытный сотрудник"
+                await connection.execute(
+                    """UPDATE game_employment
+                       SET shifts_completed = $2, rank_name = $3, last_shift_at = NOW()
+                       WHERE user_id = $1""",
+                    user_id, shifts, rank,
+                )
+                await connection.execute(
+                    """UPDATE game_players SET coins = coins + $2, xp = xp + 35,
+                       updated_at = NOW() WHERE user_id = $1""",
+                    user_id, reward,
+                )
+                updated = await connection.fetchrow(
+                    """SELECT e.job_id, e.rank_name, e.shifts_completed, e.last_shift_at,
+                              j.name AS job_name, j.reward_coins
+                       FROM game_employment e JOIN game_jobs j ON j.id = e.job_id
+                       WHERE e.user_id = $1""",
+                    user_id,
+                )
+                return "ok", updated, reward
+
+    async def quit_game_job(self, user_id: int) -> bool:
+        result = await self._require_pool().execute(
+            "DELETE FROM game_employment WHERE user_id = $1", user_id
+        )
+        return result.endswith("1")
 
 
 
