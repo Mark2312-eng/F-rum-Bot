@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 from database import database
 from moderation import moderate_message, mute_member, owner_summary, register_group, unmute_member, warn_member
+from group_settings import apply_setting_callback, show_group_settings
 
 load_dotenv()
 
@@ -460,6 +461,18 @@ async def group_register_handler(message: Message, bot: Bot) -> None:
         await register_group(message, bot, owner_id)
 
 
+async def group_settings_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await show_group_settings(message, bot, owner_id)
+
+
+async def group_setting_callback(callback: CallbackQuery, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await apply_setting_callback(callback, bot, owner_id)
+
+
 async def group_moderation_handler(message: Message, bot: Bot) -> None:
     owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
     if owner_id > 0:
@@ -494,11 +507,13 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(cmd_myid, Command("myid"))
     dispatcher.message.register(cmd_chats, Command("chats"))
     dispatcher.message.register(group_register_handler, Command("connect"))
+    dispatcher.message.register(group_settings_handler, Command("settings"))
     dispatcher.message.register(group_warn_handler, Command("warn"))
     dispatcher.message.register(group_mute_handler, Command("mute"))
     dispatcher.message.register(group_unmute_handler, Command("unmute"))
     dispatcher.message.register(group_moderation_handler)
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
+    dispatcher.callback_query.register(group_setting_callback, F.data.startswith("cfg:"))
     return dispatcher
 
 
