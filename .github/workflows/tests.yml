@@ -22,3 +22,7 @@ jobs:
           pip install -r requirements.txt
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+      - name: Check Mini App JavaScript syntax
+        run: |
+          python -c "import re; from pathlib import Path; html=Path('webapp/index.html').read_text(); match=re.search(r'<script>([\\s\\S]*?)</script>', html); assert match, 'Mini App script not found'; Path('/tmp/webapp.js').write_text(match.group(1))"
+          node --check /tmp/webapp.js
