@@ -50,8 +50,8 @@ def format_family(family, members: list | None = None) -> str:
         return (
             "👨‍👩‍👧‍👦 <b>Семья</b>\n\n"
             "Ты пока не состоишь в семье.\n"
-            "Создать: <code>/family create Название</code>\n"
-            "Вступить: <code>/family join ID</code>"
+            "Создать: <code>create Название</code>\n"
+            "Вступить: <code>join ID</code>"
         )
     lines = [
         f"👨‍👩‍👧‍👦 <b>Семья «{escape(family['name'])}»</b>",
@@ -108,10 +108,10 @@ async def manage_family(message: Message, command: CommandObject) -> None:
     else:
         await message.answer(
             "Использование:\n"
-            "<code>/family</code> — информация\n"
-            "<code>/family create Название</code> — создать\n"
-            "<code>/family join ID</code> — вступить\n"
-            "<code>/family leave</code> — покинуть",
+            "<code>info</code> — информация\n"
+            "<code>create Название</code> — создать\n"
+            "<code>join ID</code> — вступить\n"
+            "<code>leave</code> — покинуть",
             parse_mode="HTML",
         )
 
@@ -177,7 +177,7 @@ async def manage_faction(message: Message, command: CommandObject) -> None:
     elif action in {"info", "members"} and len(parts) == 1:
         faction, members = await database.get_game_faction_roster(actor_id)
         if faction is None:
-            await message.answer("Сначала вступи во фракцию через /factions.")
+            await message.answer("Сначала выбери фракцию в разделе «Организации» и вступи кнопкой.")
             return
         lines = [f"🏛 <b>{escape(faction['name'])}</b>", ""]
         if action == "members":
@@ -197,12 +197,12 @@ async def manage_faction(message: Message, command: CommandObject) -> None:
         lines.extend([
             "",
             "<b>Управление лидера</b>",
-            "<code>/faction claim</code> — занять свободное лидерство",
-            "<code>/faction promote ID</code> — повысить участника",
-            "<code>/faction demote ID</code> — понизить участника",
-            "<code>/faction kick ID</code> — исключить участника",
-            "<code>/faction transfer ID</code> — передать лидерство",
-            "<code>/faction members</code> — состав фракции",
+            "<code>claim</code> — занять свободное лидерство",
+            "<code>promote ID</code> — повысить участника",
+            "<code>demote ID</code> — понизить участника",
+            "<code>kick ID</code> — исключить участника",
+            "<code>transfer ID</code> — передать лидерство",
+            "<code>members</code> — состав фракции",
         ])
         await message.answer("\n".join(lines), parse_mode="HTML")
         return
