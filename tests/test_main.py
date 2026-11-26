@@ -109,18 +109,27 @@ class ProfileFormattingTests(unittest.TestCase):
             build_stats_message({}, "https://forum.example/"),
         )
 
-    def test_main_keyboard_has_all_first_phase_sections(self):
-        keyboard = build_main_keyboard("https://forum.example/")
-        callbacks = {
+    def test_main_keyboard_shows_button_sections_and_owner_only_panel(self):
+        public_keyboard = build_main_keyboard("https://forum.example/")
+        public_callbacks = {
             button.callback_data
-            for row in keyboard.inline_keyboard
+            for row in public_keyboard.inline_keyboard
             for button in row
             if button.callback_data
         }
-        self.assertEqual(
-            callbacks,
-            {"owner_panel", "game:profile"},
-        )
+        self.assertIn("menu:game", public_callbacks)
+        self.assertIn("menu:economy", public_callbacks)
+        self.assertNotIn("owner_panel", public_callbacks)
+
+        owner_keyboard = build_main_keyboard("https://forum.example/", is_owner=True)
+        owner_callbacks = {
+            button.callback_data
+            for row in owner_keyboard.inline_keyboard
+            for button in row
+            if button.callback_data
+        }
+        self.assertIn("owner_panel", owner_callbacks)
+
 
 
 class XenForoApiTests(unittest.IsolatedAsyncioTestCase):
