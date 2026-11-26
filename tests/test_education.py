@@ -4,6 +4,7 @@ import unittest
 from education import (
     format_education_courses,
     format_education_institutions,
+    format_education_groups,
     format_education_profile,
     format_education_roster,
 )
@@ -21,6 +22,18 @@ class EducationFormattingTests(unittest.TestCase):
         self.assertIn("&lt;Школа&gt;", rendered)
         self.assertIn("&lt;Центр&gt;", rendered)
         self.assertIn("Учащихся: 12", rendered)
+
+
+    def test_groups_escape_names_and_show_counts(self):
+        rendered = format_education_groups([{
+            "institution_name": "<Университет>",
+            "group_code": "A-01",
+            "group_name": "<Группа>",
+            "students": 8,
+        }])
+        self.assertIn("&lt;Университет&gt;", rendered)
+        self.assertIn("&lt;Группа&gt;", rendered)
+        self.assertIn("Учащихся: 8", rendered)
 
     def test_empty_profile_explains_enrollment(self):
         rendered = format_education_profile(None)
