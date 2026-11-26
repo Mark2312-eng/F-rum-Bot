@@ -1,10 +1,36 @@
 """Tests for game profile formatting and leaderboard output."""
 import unittest
 
+from database import Database
 from game import format_achievements, format_game_profile, format_leaderboard
 
 
+class FakePool:
+    def __init__(self):
+        self.executed_query = None
+        self.executed_args = None
+
+    async def execute(self, query, *args):
+        self.executed_query = query
+        self.executed_args = args
+
+    async def fetch(self, query, *args):
+        return []
+
+
 class GameFormattingTests(unittest.TestCase):
+    def test_achievement_sync_uses_lateral_player_columns(self):
+        import asyncio
+
+        database = Database()
+        fake_pool = FakePool()
+        database.pool = fake_pool
+        asyncio.run(database.sync_game_achievements(12))
+
+        self.assertIn("CROSS JOIN LATERAL", fake_pool.executed_query)
+        self.assertIn("game_players.xp >= 50", fake_pool.executed_query)
+        self.assertEqual(fake_pool.executed_args, (12,))
+
     def test_profile_escapes_username_and_calculates_level(self):
         profile = {
             "user_id": 12,
