@@ -15,14 +15,15 @@ class CityFormattingTests(unittest.TestCase):
         rendered = format_places()
         self.assertIn("Мэрия", rendered)
         self.assertIn("Больница", rendered)
-        self.assertIn("UTC", rendered)
+        self.assertIn("Проспект Здоровья, 12", rendered)
 
     def test_events_have_deterministic_schedule(self):
         now = datetime(2026, 11, 26, 12, 0, tzinfo=timezone.utc)
         rendered = format_events(now)
         self.assertIn("Городская ярмарка", rendered)
-        self.assertIn("26.11.2026 02:00 UTC", rendered)
+        self.assertIn("27.11.2026 02:00 UTC", rendered)
         self.assertIn("игровые события", rendered)
+        self.assertIn("\nКод записи", rendered)
 
 
 if __name__ == "__main__":
