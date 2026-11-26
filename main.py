@@ -29,6 +29,7 @@ from service import manage_service
 from medical import manage_medical
 from education import manage_education
 from transport import manage_transport
+from taxi import manage_taxi
 
 load_dotenv()
 
@@ -547,6 +548,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(manage_medical, Command("med"))
     dispatcher.message.register(manage_education, Command("edu"))
     dispatcher.message.register(manage_transport, Command("bus"))
+    dispatcher.message.register(manage_taxi, Command("taxi"))
     dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
     dispatcher.message.register(cmd_owner, Command("owner"))
