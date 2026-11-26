@@ -25,7 +25,7 @@ class OrganizationFormattingTests(unittest.TestCase):
         self.assertIn("не состоишь во фракции", rendered)
 
     def test_family_not_joined(self):
-        self.assertIn("/family create", format_family(None))
+        self.assertIn("create Название", format_family(None))
 
     def test_family_profile(self):
         rendered = format_family({
