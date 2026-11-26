@@ -288,6 +288,70 @@ async def webapp_api(request: web.Request) -> web.Response:
             return web.json_response({"family": dict(family) if family else None})
         if action == "jobs":
             return web.json_response({"items": rows(await database.get_game_jobs())})
+        if action == "quests":
+            quests = await database.get_game_quests(user_id)
+            return web.json_response({"items": [{"code": q["code"], "title": q["title"], "description": q["description"], "reward_coins": q["reward_coins"], "reward_xp": q["reward_xp"], "reward_reputation": q["reward_reputation"], "ready": q["ready"], "completed": q["completed_at"] is not None} for q in quests]})
+        if action == "claim_quest":
+            code = str(payload.get("code", ""))[:64]
+            status, coins, xp, reputation = await database.claim_game_quest(user_id, username, code)
+            messages = {"ok": f"Награда получена: +{coins} монет, +{xp} XP, +{reputation} репутации.", "not_ready": "Сначала выполни условие задания.", "claimed": "Это задание уже выполнено.", "missing": "Задание не найдено."}
+            return web.json_response({"ok": status == "ok", "status": status, "message": messages.get(status, "Не удалось получить награду.")})
+        if action == "reputation":
+            player = await database.get_game_reputation(user_id)
+            if player is None:
+                return web.json_response({"player": None})
+            score = int(player["reputation"])
+            title = "Легенда города" if score >= 50 else "Уважаемый житель" if score >= 25 else "Известный житель" if score >= 10 else "Активный житель" if score >= 3 else "Новичок"
+            return web.json_response({"player": {"username": player["username"], "xp": player["xp"], "coins": player["coins"], "reputation": score, "title": title}})
+        if action in {"events", "join_event", "leave_event"}:
+            events = [{"code": "fair", "title": "Городская ярмарка", "description": "Знакомство с городскими организациями и торговыми точками.", "starts_in_hours": 14}, {"code": "open_day", "title": "День открытых дверей", "description": "Презентации игровых фракций и профессий.", "starts_in_hours": 38}, {"code": "cleanup", "title": "Городской субботник", "description": "Совместное общественное мероприятие игроков.", "starts_in_hours": 62}]
+            if action == "join_event":
+                code = str(payload.get("code", ""))[:32]
+                status = await database.signup_city_event(user_id, username, code)
+                return web.json_response({"ok": status == "joined", "status": status, "message": {"joined": "Запись на событие подтверждена.", "already": "Ты уже записан на это событие.", "missing": "Неизвестное событие."}[status]})
+            if action == "leave_event":
+                code = str(payload.get("code", ""))[:32]
+                status = await database.leave_city_event(user_id, code)
+                return web.json_response({"ok": status == "left", "status": status, "message": {"left": "Запись отменена.", "not_joined": "Ты не записан на это событие.", "missing": "Неизвестное событие."}[status]})
+            signed = {r["event_code"] for r in await database.get_user_city_event_signups(user_id)}
+            return web.json_response({"items": [{**event, "joined": event["code"] in signed} for event in events]})
+        if action == "tournaments":
+            items = rows(await database.get_game_tournaments())
+            return web.json_response({"items": items})
+        if action == "join_tournament":
+            try:
+                tournament_id = int(payload.get("tournament_id", 0))
+            except (TypeError, ValueError):
+                tournament_id = 0
+            status = await database.join_game_tournament(user_id, tournament_id)
+            messages = {"joined": "Семья зарегистрирована на турнир.", "already": "Семья уже участвует.", "not_owner": "Записать семью может только её владелец.", "missing": "Турнир не найден.", "closed": "Регистрация закрыта."}
+            return web.json_response({"ok": status == "joined", "status": status, "message": messages.get(status, "Не удалось записаться.")})
+        if action == "transport":
+            routes = rows(await database.list_transport_routes())
+            return web.json_response({"routes": routes, "tickets": await database.get_transport_ticket_count(user_id), "history": [{"route": h["route_name"], "from": h["from_name"], "to": h["to_name"], "date": h["created_at"].isoformat()} for h in await database.get_transport_ride_history(user_id)]})
+        if action == "transport_stops":
+            try:
+                route_id = int(payload.get("route_id", 0))
+            except (TypeError, ValueError):
+                route_id = 0
+            stops = rows(await database.list_transport_stops(route_id))
+            return web.json_response({"items": stops})
+        if action == "buy_tickets":
+            try:
+                quantity = int(payload.get("quantity", 1))
+            except (TypeError, ValueError):
+                quantity = 0
+            ok, message = await database.buy_transport_tickets(user_id, username, quantity)
+            return web.json_response({"ok": ok, "message": message, "tickets": await database.get_transport_ticket_count(user_id)})
+        if action == "ride_transport":
+            try:
+                route_id = int(payload.get("route_id", 0))
+                from_stop = int(payload.get("from_stop_id", 0))
+                to_stop = int(payload.get("to_stop_id", 0))
+            except (TypeError, ValueError):
+                return web.json_response({"error": "Некорректные остановки."}, status=400)
+            ok, message = await database.ride_city_transport(user_id, route_id, from_stop, to_stop)
+            return web.json_response({"ok": ok, "message": message, "tickets": await database.get_transport_ticket_count(user_id)})
         if action == "buy":
             kind, code = str(payload.get("kind", "")), str(payload.get("code", ""))
             if not code or len(code) > 64:
