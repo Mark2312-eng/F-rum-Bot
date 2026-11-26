@@ -9,15 +9,15 @@ from database import database
 
 def format_tournaments(rows: list) -> str:
     if not rows:
-        return "🏆 <b>Турниры семей</b>\\n\\nПока турниров нет. Глава семьи может создать турнир."
+        return "🏆 <b>Турниры семей</b>\n\nПока турниров нет. Глава семьи может создать турнир."
     lines = ["🏆 <b>Турниры семей</b>", ""]
     for row in rows:
         status = "🟢 Регистрация" if row["status"] == "open" else "🏁 Завершён"
         lines.append(
-            f"#{row['id']} <b>{escape(row['name'])}</b>\\n"
-            f"Статус: {status} · Семей: {row['family_count']}\\n"
+            f"#{row['id']} <b>{escape(row['name'])}</b>\n"
+            f"Статус: {status} · Семей: {row['family_count']}\n"
             f"Приз: {row['prize_coins']} игровых монет"
-            + (f"\\nПобедитель: <b>{escape(row['winner_name'])}</b>" if row["winner_name"] else "")
+            + (f"\nПобедитель: <b>{escape(row['winner_name'])}</b>" if row["winner_name"] else "")
         )
     lines.extend([
         "",
@@ -25,7 +25,7 @@ def format_tournaments(rows: list) -> str:
         "/tournament join ID",
         "/tournament finish ID FAMILY_ID",
     ])
-    return "\\n\\n".join(lines)
+    return "\n\n".join(lines)
 
 
 async def show_tournaments(message: Message) -> None:
@@ -40,9 +40,9 @@ async def manage_tournament(message: Message, command: CommandObject) -> None:
     parts = args.split()
     if not parts:
         await message.answer(
-            "Использование:\\n"
-            "<code>/tournament create Название 500</code> — создать турнир и указать общий приз\\n"
-            "<code>/tournament join ID</code> — зарегистрировать семью\\n"
+            "Использование:\n"
+            "<code>/tournament create Название 500</code> — создать турнир и указать общий приз\n"
+            "<code>/tournament join ID</code> — зарегистрировать семью\n"
             "<code>/tournament finish ID FAMILY_ID</code> — завершить турнир и указать победителя",
             parse_mode="HTML",
         )
