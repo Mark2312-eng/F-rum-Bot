@@ -11,14 +11,14 @@ from aiogram import Bot
 from aiogram.enums import ChatType
 from aiogram.types import ChatPermissions, Message
 
+from database import database
+
 URL_RE = re.compile(r"(?:https?://|www\.|t\.me/|telegram\.me/)", re.IGNORECASE)
 FLOOD_WINDOW_SECONDS = 8
 FLOOD_MAX_MESSAGES = 6
 WARNING_LIMIT = 3
 
 _message_times: dict[tuple[int, int], deque[float]] = defaultdict(deque)
-_warnings: dict[tuple[int, int], int] = defaultdict(int)
-_registered_chats: set[int] = set()
 
 
 def is_group(message: Message) -> bool:
@@ -60,7 +60,7 @@ async def register_group(message: Message, bot: Bot, owner_id: int) -> None:
         return
     if message.from_user.id != owner_id:
         return
-    _registered_chats.add(message.chat.id)
+    await database.register_chat(message.chat.id, message.chat.title or "", owner_id)
     await message.answer(
         "✅ Эта группа подключена к F-rum-Bot.\n"
         "Режим: balanced.\n"
@@ -70,6 +70,8 @@ async def register_group(message: Message, bot: Bot, owner_id: int) -> None:
 
 async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
     if not is_group(message) or not message.from_user or message.from_user.is_bot:
+        return
+    if not await database.is_chat_registered(message.chat.id):
         return
     if message.from_user.id == owner_id:
         return
@@ -108,6 +110,9 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
 async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
     if not is_group(message):
         return
+    if not await database.is_chat_registered(message.chat.id):
+        await message.reply("Сначала подключи эту группу командой /connect от имени владельца бота.")
+        return
     if not await is_moderator(message, bot, owner_id):
         await message.reply("⛔ Команда доступна только владельцу и администраторам группы.")
         return
@@ -118,9 +123,7 @@ async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
     if target.id == owner_id or await is_chat_admin(bot, message.chat.id, target.id):
         await message.reply("Нельзя выдать предупреждение владельцу или администратору.")
         return
-    key = (message.chat.id, target.id)
-    _warnings[key] += 1
-    count = _warnings[key]
+    count = await database.add_warning(message.chat.id, target.id)
     if count >= WARNING_LIMIT:
         try:
             await bot.restrict_chat_member(
@@ -129,7 +132,7 @@ async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
                 permissions=ChatPermissions(can_send_messages=False),
                 until_date=int(time.time()) + 300,
             )
-            _warnings[key] = 0
+            await database.reset_warnings(message.chat.id, target.id)
             await message.answer(
                 f"🔇 {target.mention_html()} получил {WARNING_LIMIT} предупреждения и ограничен на 5 минут.",
                 parse_mode="HTML",
@@ -145,6 +148,9 @@ async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
 
 async def mute_member(message: Message, bot: Bot, owner_id: int) -> None:
     if not is_group(message):
+        return
+    if not await database.is_chat_registered(message.chat.id):
+        await message.reply("Сначала подключи эту группу командой /connect от имени владельца бота.")
         return
     if not await is_moderator(message, bot, owner_id):
         await message.reply("⛔ Команда доступна только владельцу и администраторам группы.")
@@ -170,6 +176,9 @@ async def mute_member(message: Message, bot: Bot, owner_id: int) -> None:
 
 async def unmute_member(message: Message, bot: Bot, owner_id: int) -> None:
     if not is_group(message):
+        return
+    if not await database.is_chat_registered(message.chat.id):
+        await message.reply("Сначала подключи эту группу командой /connect от имени владельца бота.")
         return
     if not await is_moderator(message, bot, owner_id):
         await message.reply("⛔ Команда доступна только владельцу и администраторам группы.")
@@ -200,17 +209,13 @@ async def unmute_member(message: Message, bot: Bot, owner_id: int) -> None:
         await message.reply("Не удалось снять ограничение. Проверь права бота.")
 
 
-def owner_summary(owner_id: int) -> str:
+def owner_summary(owner_id: int, chat_count: int) -> str:
     return (
-        "⚙️ <b>Панель владельца</b>\n\n"
-        f"🆔 Ваш Telegram ID: <code>{owner_id}</code>\n"
-        f"👥 Групп подключено в текущем запуске: <b>{len(_registered_chats)}</b>\n\n"
-        "Команды:\n"
-        "/myid — показать ваш ID\n"
-        "/chats — показать число подключённых групп\n"
-        "В группе: /warn, /mute, /unmute — ответом на сообщение."
+        "⚙️ <b>Панель владельца</b>\\n\\n"
+        f"🆔 Ваш Telegram ID: <code>{owner_id}</code>\\n"
+        f"👥 Подключено групп: <b>{chat_count}</b>\\n\\n"
+        "Команды:\\n"
+        "/myid — показать ваш ID\\n"
+        "/chats — показать число подключённых групп\\n"
+        "В группе: /connect, /warn, /mute, /unmute — ответом на сообщение."
     )
-
-
-def registered_chat_count() -> int:
-    return len(_registered_chats)
