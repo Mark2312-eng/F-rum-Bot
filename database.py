@@ -366,6 +366,41 @@ class Database:
                     quantity INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+                CREATE TABLE IF NOT EXISTS game_taxi_orders (
+                    id BIGSERIAL PRIMARY KEY,
+                    passenger_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    driver_id BIGINT REFERENCES game_players(user_id) ON DELETE SET NULL,
+                    route_id BIGINT NOT NULL REFERENCES game_transport_routes(id),
+                    from_stop_id BIGINT NOT NULL REFERENCES game_transport_stops(id),
+                    to_stop_id BIGINT NOT NULL REFERENCES game_transport_stops(id),
+                    fare INTEGER NOT NULL CHECK (fare > 0),
+                    driver_reward INTEGER NOT NULL CHECK (driver_reward >= 0),
+                    status TEXT NOT NULL DEFAULT 'open'
+                        CHECK (status IN ('open', 'accepted', 'completed', 'cancelled')),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    accepted_at TIMESTAMPTZ,
+                    completed_at TIMESTAMPTZ,
+                    cancelled_at TIMESTAMPTZ,
+                    CHECK (passenger_id <> driver_id),
+                    CHECK (from_stop_id <> to_stop_id)
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS game_taxi_passenger_active_idx
+                    ON game_taxi_orders (passenger_id)
+                    WHERE status IN ('open', 'accepted');
+                CREATE UNIQUE INDEX IF NOT EXISTS game_taxi_driver_active_idx
+                    ON game_taxi_orders (driver_id)
+                    WHERE driver_id IS NOT NULL AND status = 'accepted';
+                CREATE INDEX IF NOT EXISTS game_taxi_orders_status_created_idx
+                    ON game_taxi_orders (status, created_at DESC);
+                CREATE TABLE IF NOT EXISTS game_taxi_ratings (
+                    order_id BIGINT PRIMARY KEY REFERENCES game_taxi_orders(id) ON DELETE CASCADE,
+                    passenger_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    driver_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS game_taxi_ratings_driver_idx
+                    ON game_taxi_ratings (driver_id, created_at DESC);
                 CREATE TABLE IF NOT EXISTS game_transport_rides (
                     id BIGSERIAL PRIMARY KEY,
                     user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
@@ -2210,6 +2245,208 @@ class Database:
                JOIN game_transport_stops a ON a.id = t.from_stop_id
                JOIN game_transport_stops b ON b.id = t.to_stop_id
                WHERE t.user_id = $1 ORDER BY t.created_at DESC LIMIT 10""", user_id
+        )
+
+
+
+    async def create_taxi_order(
+        self, passenger_id: int, username: str, route_id: int,
+        from_stop_id: int, to_stop_id: int
+    ) -> tuple[bool, str]:
+        if from_stop_id == to_stop_id:
+            return False, "Точки подачи и назначения должны различаться."
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username)
+                       VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE
+                       SET username = CASE WHEN EXCLUDED.username <> ''
+                                           THEN EXCLUDED.username ELSE game_players.username END""",
+                    passenger_id, username[:64]
+                )
+                route = await connection.fetchrow(
+                    """SELECT id, name FROM game_transport_routes
+                       WHERE id = $1 AND active = TRUE""", route_id
+                )
+                if route is None:
+                    return False, "Маршрут не найден. Используй /bus routes."
+                stops = await connection.fetchrow(
+                    """SELECT a.stop_order AS from_order, b.stop_order AS to_order
+                       FROM game_transport_route_stops a
+                       JOIN game_transport_route_stops b ON b.route_id = a.route_id
+                       WHERE a.route_id = $1 AND a.stop_id = $2 AND b.stop_id = $3""",
+                    route_id, from_stop_id, to_stop_id
+                )
+                if stops is None or stops["to_order"] <= stops["from_order"]:
+                    return False, "Выбери две остановки одного маршрута в правильном порядке."
+                segments = int(stops["to_order"]) - int(stops["from_order"])
+                fare = 30 + (segments - 1) * 10
+                driver_reward = fare * 8 // 10
+                player = await connection.fetchrow(
+                    "SELECT coins FROM game_players WHERE user_id = $1 FOR UPDATE",
+                    passenger_id
+                )
+                active_order = await connection.fetchval(
+                    """SELECT EXISTS(SELECT 1 FROM game_taxi_orders
+                       WHERE passenger_id = $1 AND status IN ('open', 'accepted'))""",
+                    passenger_id
+                )
+                if active_order:
+                    return False, "У тебя уже есть активный заказ такси."
+                if int(player["coins"]) < fare:
+                    return False, f"Недостаточно монет. Поездка стоит {fare}."
+                await connection.execute(
+                    """UPDATE game_players SET coins = coins - $2, updated_at = NOW()
+                       WHERE user_id = $1""", passenger_id, fare
+                )
+                order = await connection.fetchrow(
+                    """INSERT INTO game_taxi_orders
+                       (passenger_id, route_id, from_stop_id, to_stop_id, fare, driver_reward)
+                       VALUES ($1, $2, $3, $4, $5, $6)
+                       RETURNING id""",
+                    passenger_id, route_id, from_stop_id, to_stop_id, fare, driver_reward
+                )
+                return True, f"Заказ №{order['id']} создан. Стоимость {fare} монет. Ожидай водителя."
+
+    async def list_open_taxi_orders(self) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT o.id, o.fare, r.name AS route_name,
+                      a.name AS from_name, b.name AS to_name, p.username AS passenger_name
+               FROM game_taxi_orders o
+               JOIN game_transport_routes r ON r.id = o.route_id
+               JOIN game_transport_stops a ON a.id = o.from_stop_id
+               JOIN game_transport_stops b ON b.id = o.to_stop_id
+               JOIN game_players p ON p.user_id = o.passenger_id
+               WHERE o.status = 'open'
+               ORDER BY o.created_at ASC LIMIT 30"""
+        )
+
+    async def accept_taxi_order(self, driver_id: int, order_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                employment = await connection.fetchrow(
+                    """SELECT e.user_id FROM game_employment e
+                       JOIN game_jobs j ON j.id = e.job_id
+                       WHERE e.user_id = $1 AND j.name = 'Таксист' AND j.active = TRUE
+                       FOR UPDATE OF e""", driver_id
+                )
+                if employment is None:
+                    return False, "Для принятия заказов нужна игровая работа «Таксист»."
+                order = await connection.fetchrow(
+                    """SELECT id, passenger_id, status FROM game_taxi_orders
+                       WHERE id = $1 FOR UPDATE""", order_id
+                )
+                if order is None or order["status"] != "open":
+                    return False, "Заказ уже недоступен."
+                if int(order["passenger_id"]) == driver_id:
+                    return False, "Нельзя принять собственный заказ."
+                busy = await connection.fetchval(
+                    """SELECT EXISTS(
+                         SELECT 1 FROM game_taxi_orders
+                         WHERE driver_id = $1 AND status = 'accepted'
+                       )""", driver_id
+                )
+                if busy:
+                    return False, "Сначала заверши текущий заказ."
+                await connection.execute(
+                    """UPDATE game_taxi_orders
+                       SET driver_id = $2, status = 'accepted', accepted_at = NOW()
+                       WHERE id = $1 AND status = 'open'""", order_id, driver_id
+                )
+                return True, f"Заказ №{order_id} принят. После игровой поездки используй /taxi finish {order_id}."
+
+    async def finish_taxi_order(self, driver_id: int, order_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                order = await connection.fetchrow(
+                    """SELECT id, driver_reward, status FROM game_taxi_orders
+                       WHERE id = $1 AND driver_id = $2 FOR UPDATE""", order_id, driver_id
+                )
+                if order is None or order["status"] != "accepted":
+                    return False, "У тебя нет этого активного заказа."
+                await connection.execute(
+                    """UPDATE game_taxi_orders
+                       SET status = 'completed', completed_at = NOW()
+                       WHERE id = $1""", order_id
+                )
+                await connection.execute(
+                    """UPDATE game_players SET coins = coins + $2, xp = xp + 15,
+                       updated_at = NOW() WHERE user_id = $1""",
+                    driver_id, order["driver_reward"]
+                )
+                return True, f"Заказ №{order_id} завершён. Начислено {order['driver_reward']} монет и 15 XP."
+
+    async def cancel_taxi_order(self, passenger_id: int, order_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                order = await connection.fetchrow(
+                    """SELECT id, fare, status FROM game_taxi_orders
+                       WHERE id = $1 AND passenger_id = $2 FOR UPDATE""",
+                    order_id, passenger_id
+                )
+                if order is None or order["status"] != "open":
+                    return False, "Можно отменить только собственный заказ, который ещё не принят."
+                await connection.execute(
+                    """UPDATE game_taxi_orders SET status = 'cancelled', cancelled_at = NOW()
+                       WHERE id = $1""", order_id
+                )
+                await connection.execute(
+                    """UPDATE game_players SET coins = coins + $2, updated_at = NOW()
+                       WHERE user_id = $1""", passenger_id, order["fare"]
+                )
+                return True, f"Заказ №{order_id} отменён. Возвращено {order['fare']} монет."
+
+    async def rate_taxi_driver(
+        self, passenger_id: int, order_id: int, rating: int
+    ) -> tuple[bool, str]:
+        if not 1 <= rating <= 5:
+            return False, "Оценка должна быть от 1 до 5."
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                order = await connection.fetchrow(
+                    """SELECT driver_id, status FROM game_taxi_orders
+                       WHERE id = $1 AND passenger_id = $2 FOR UPDATE""",
+                    order_id, passenger_id
+                )
+                if order is None or order["status"] != "completed" or order["driver_id"] is None:
+                    return False, "Оценить можно только завершённую поездку."
+                saved = await connection.fetchval(
+                    """INSERT INTO game_taxi_ratings (order_id, passenger_id, driver_id, rating)
+                       VALUES ($1, $2, $3, $4)
+                       ON CONFLICT (order_id) DO NOTHING
+                       RETURNING rating""",
+                    order_id, passenger_id, order["driver_id"], rating
+                )
+                if saved is None:
+                    return False, "Эта поездка уже оценена."
+                return True, "Оценка сохранена."
+
+    async def get_taxi_driver_rating(self, driver_id: int) -> asyncpg.Record | None:
+        return await self._require_pool().fetchrow(
+            """SELECT COUNT(*)::int AS ratings, ROUND(AVG(rating), 2) AS average_rating
+               FROM game_taxi_ratings WHERE driver_id = $1""", driver_id
+        )
+
+    async def get_taxi_history(self, user_id: int) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT o.id, o.status, o.fare, r.name AS route_name,
+                      a.name AS from_name, b.name AS to_name,
+                      passenger.username AS passenger_name, driver.username AS driver_name,
+                      o.created_at
+               FROM game_taxi_orders o
+               JOIN game_transport_routes r ON r.id = o.route_id
+               JOIN game_transport_stops a ON a.id = o.from_stop_id
+               JOIN game_transport_stops b ON b.id = o.to_stop_id
+               JOIN game_players passenger ON passenger.user_id = o.passenger_id
+               LEFT JOIN game_players driver ON driver.user_id = o.driver_id
+               WHERE o.passenger_id = $1 OR o.driver_id = $1
+               ORDER BY o.created_at DESC LIMIT 20""", user_id
         )
 
 
