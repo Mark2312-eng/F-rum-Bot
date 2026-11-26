@@ -262,11 +262,11 @@ def build_stats_message(stats: dict, forum_url: str) -> str:
             lines.append(f"   • Гостей: {guests}")
 
     latest_user = stats.get("latest_user")
+    if len(lines) == 2 and not (isinstance(latest_user, dict) and latest_user.get("username")):
+        return "⚠️ Форум не вернул доступные статистические данные."
     if isinstance(latest_user, dict) and latest_user.get("username"):
         lines.extend(["", f"🆕 Последний участник: <b>{escape(str(latest_user['username']))}</b>"])
     lines.extend(["", f'<a href="{escape(forum_url, quote=True)}">Открыть форум</a>'])
-    if len(lines) == 2:
-        return "⚠️ Форум не вернул доступные статистические данные."
     return "\n".join(lines)
 
 
