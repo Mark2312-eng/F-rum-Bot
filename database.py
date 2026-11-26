@@ -85,6 +85,7 @@ class Database:
                     id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE,
                     description TEXT NOT NULL DEFAULT ''
                 );
+                ALTER TABLE game_factions ADD COLUMN IF NOT EXISTS leader_id BIGINT REFERENCES game_players(user_id) ON DELETE SET NULL;
                 CREATE TABLE IF NOT EXISTS game_faction_members (
                     faction_id BIGINT NOT NULL REFERENCES game_factions(id) ON DELETE CASCADE,
                     user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
@@ -1016,6 +1017,141 @@ class Database:
                WHERE user_id = $1 ORDER BY signed_up_at ASC""",
             user_id
         )
+
+
+    async def claim_game_faction_leadership(self, user_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                membership = await connection.fetchrow(
+                    "SELECT faction_id FROM game_faction_members WHERE user_id = $1 FOR UPDATE",
+                    user_id,
+                )
+                if membership is None:
+                    return False, "Сначала вступи во фракцию."
+                faction_id = membership["faction_id"]
+                leader = await connection.fetchval(
+                    "UPDATE game_factions SET leader_id = $1 WHERE id = $2 AND leader_id IS NULL RETURNING id",
+                    user_id, faction_id,
+                )
+                if leader is None:
+                    return False, "У этой фракции уже есть лидер."
+                await connection.execute(
+                    "UPDATE game_faction_members SET rank_name = 'Лидер' WHERE faction_id = $1 AND user_id = $2",
+                    faction_id, user_id,
+                )
+                return True, "Ты назначен лидером фракции."
+
+    async def get_game_faction_roster(self, user_id: int) -> tuple[asyncpg.Record | None, list[asyncpg.Record]]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            faction = await connection.fetchrow(
+                """SELECT f.id, f.name, f.leader_id FROM game_factions f
+                   JOIN game_faction_members m ON m.faction_id = f.id
+                   WHERE m.user_id = $1""", user_id
+            )
+            if faction is None:
+                return None, []
+            members = await connection.fetch(
+                """SELECT m.user_id, m.rank_name, p.username
+                   FROM game_faction_members m JOIN game_players p ON p.user_id = m.user_id
+                   WHERE m.faction_id = $1
+                   ORDER BY CASE m.rank_name
+                     WHEN 'Лидер' THEN 0 WHEN 'Заместитель' THEN 1
+                     WHEN 'Старший' THEN 2 WHEN 'Сотрудник' THEN 3 ELSE 4 END,
+                     m.joined_at ASC""",
+                faction["id"]
+            )
+            return faction, members
+
+    async def change_game_faction_rank(self, actor_id: int, target_id: int, direction: int) -> tuple[bool, str]:
+        ranks = ["Рекрут", "Сотрудник", "Старший", "Заместитель", "Лидер"]
+        if direction not in (-1, 1) or actor_id == target_id:
+            return False, "Некорректная цель повышения или понижения."
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                actor = await connection.fetchrow(
+                    """SELECT m.faction_id, f.leader_id FROM game_faction_members m
+                       JOIN game_factions f ON f.id = m.faction_id
+                       WHERE m.user_id = $1 FOR UPDATE OF f""", actor_id
+                )
+                if actor is None or actor["leader_id"] != actor_id:
+                    return False, "Изменять ранги может только лидер фракции."
+                target = await connection.fetchrow(
+                    "SELECT rank_name FROM game_faction_members WHERE faction_id = $1 AND user_id = $2 FOR UPDATE",
+                    actor["faction_id"], target_id
+                )
+                if target is None:
+                    return False, "Игрок не состоит в твоей фракции."
+                try:
+                    index = ranks.index(target["rank_name"])
+                except ValueError:
+                    index = 0
+                next_index = index + direction
+                if next_index < 0 or next_index >= len(ranks) - 1:
+                    return False, "Нельзя изменить ранг выше или ниже допустимого уровня."
+                await connection.execute(
+                    "UPDATE game_faction_members SET rank_name = $1 WHERE faction_id = $2 AND user_id = $3",
+                    ranks[next_index], actor["faction_id"], target_id
+                )
+                return True, f"Новый ранг игрока: {ranks[next_index]}."
+
+    async def remove_game_faction_member(self, actor_id: int, target_id: int) -> tuple[bool, str]:
+        if actor_id == target_id:
+            return False, "Лидер не может исключить самого себя."
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                actor = await connection.fetchrow(
+                    """SELECT m.faction_id, f.leader_id FROM game_faction_members m
+                       JOIN game_factions f ON f.id = m.faction_id
+                       WHERE m.user_id = $1 FOR UPDATE OF f""", actor_id
+                )
+                if actor is None or actor["leader_id"] != actor_id:
+                    return False, "Исключать участников может только лидер фракции."
+                result = await connection.execute(
+                    "DELETE FROM game_faction_members WHERE faction_id = $1 AND user_id = $2",
+                    actor["faction_id"], target_id
+                )
+                return (True, "Участник исключён из фракции.") if result.endswith("1") else (False, "Игрок не найден во фракции.")
+
+    async def transfer_game_faction_leadership(self, actor_id: int, target_id: int) -> tuple[bool, str]:
+        if actor_id == target_id:
+            return False, "Нельзя передать лидерство самому себе."
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                actor = await connection.fetchrow(
+                    """SELECT faction_id FROM game_faction_members
+                       WHERE user_id = $1 FOR UPDATE""", actor_id
+                )
+                if actor is None:
+                    return False, "Ты не состоишь во фракции."
+                faction_id = actor["faction_id"]
+                faction = await connection.fetchrow(
+                    "SELECT leader_id FROM game_factions WHERE id = $1 FOR UPDATE", faction_id
+                )
+                if faction is None or faction["leader_id"] != actor_id:
+                    return False, "Передать лидерство может только действующий лидер."
+                target = await connection.fetchrow(
+                    "SELECT user_id FROM game_faction_members WHERE faction_id = $1 AND user_id = $2 FOR UPDATE",
+                    faction_id, target_id
+                )
+                if target is None:
+                    return False, "Новый лидер должен состоять в твоей фракции."
+                await connection.execute(
+                    "UPDATE game_faction_members SET rank_name = 'Заместитель' WHERE faction_id = $1 AND user_id = $2",
+                    faction_id, actor_id
+                )
+                await connection.execute(
+                    "UPDATE game_faction_members SET rank_name = 'Лидер' WHERE faction_id = $1 AND user_id = $2",
+                    faction_id, target_id
+                )
+                await connection.execute(
+                    "UPDATE game_factions SET leader_id = $1 WHERE id = $2", target_id, faction_id
+                )
+                return True, "Лидерство успешно передано."
 
 
 database = Database()
