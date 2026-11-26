@@ -36,6 +36,7 @@ load_dotenv()
 LOGGER = logging.getLogger(__name__)
 DEFAULT_PORT = 10000
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15, connect=5, sock_read=10)
+PENDING_INPUTS: dict[int, str] = {}
 
 
 def get_port(value: str | None = None) -> int:
@@ -428,25 +429,10 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
             "punish": "Для проверки статуса нажмите кнопку и затем отправьте ник игрока.",
         }
         if section in prompts:
+            PENDING_INPUTS[callback.from_user.id] = section
             await message.answer(prompts[section])
         else:
             await message.answer("Выберите действие:", reply_markup=build_section_keyboard(section))
-
-
-async def cmd_view_callback(callback: CallbackQuery) -> None:
-    """Open read-only screens from the button menus."""
-    actions = {
-        "game": show_game_profile, "daily": claim_daily_reward, "top": show_leaderboard,
-        "achievements": show_achievements, "jobs": show_jobs, "work": show_work,
-        "factions": show_factions, "shop": show_shop, "inventory": show_inventory,
-        "property": show_properties, "garage": show_garage, "phone": show_phone,
-        "city": show_city, "places": show_places, "events": show_events,
-        "quests": show_quests, "reputation": show_reputation, "tournaments": show_tournaments,
-    }
-    await callback.answer()
-    action = (callback.data or "").split(":", 1)[1]
-    if callback.message and action in actions:
-        await actions[action](callback.message)
 
 
 async def cmd_view_callback(callback: CallbackQuery) -> None:
@@ -614,11 +600,27 @@ async def group_unmute_handler(message: Message, bot: Bot) -> None:
         await unmute_member(message, bot, owner_id)
 
 
+async def button_input_handler(message: Message) -> None:
+    """Consume the next private text message requested by a menu button."""
+    if not message.from_user or not message.text:
+        return
+    action = PENDING_INPUTS.pop(message.from_user.id, None)
+    if action not in {"profile", "punish"}:
+        return
+    command = "profile" if action == "profile" else "punish"
+    synthetic_message = message.model_copy(update={"text": f"/{command} {message.text.strip()}"})
+    if action == "profile":
+        await cmd_profile(synthetic_message)
+    else:
+        await cmd_punish(synthetic_message)
+
+
 def create_dispatcher() -> Dispatcher:
     """Configure and return the Telegram dispatcher."""
     dispatcher = Dispatcher()
     # /start remains the technical entry point; all feature navigation uses buttons.
     dispatcher.message.register(cmd_start, Command("start"))
+    dispatcher.message.register(button_input_handler, lambda message: bool(message.from_user and message.from_user.id in PENDING_INPUTS))
     dispatcher.message.register(group_moderation_handler)
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
     dispatcher.callback_query.register(cmd_menu_callback, F.data.startswith("menu:"))
