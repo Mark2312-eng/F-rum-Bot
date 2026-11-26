@@ -7,6 +7,7 @@ import aiohttp
 
 from main import (
     build_main_keyboard,
+    build_section_keyboard,
     build_player_message,
     build_profile_message,
     build_stats_message,
@@ -108,6 +109,19 @@ class ProfileFormattingTests(unittest.TestCase):
             "не вернул доступные",
             build_stats_message({}, "https://forum.example/"),
         )
+
+    def test_button_submenus_include_all_major_gameplay_sections(self):
+        for section in ("game", "work", "organizations", "economy", "city", "quests", "tournaments", "services"):
+            with self.subTest(section=section):
+                keyboard = build_section_keyboard(section)
+                callbacks = {
+                    button.callback_data
+                    for row in keyboard.inline_keyboard
+                    for button in row
+                    if button.callback_data
+                }
+                self.assertTrue(callbacks)
+                self.assertIn("menu:home", callbacks)
 
     def test_main_keyboard_shows_button_sections_and_owner_only_panel(self):
         public_keyboard = build_main_keyboard("https://forum.example/")
