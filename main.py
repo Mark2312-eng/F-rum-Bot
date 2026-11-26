@@ -288,7 +288,7 @@ async def webapp_api(request: web.Request) -> web.Response:
             return web.json_response({"family": dict(family) if family else None})
         if action == "jobs":
             employment = await database.get_game_employment(user_id)
-            return web.json_response({"items": rows(await database.get_game_jobs()), "employment": dict(employment) if employment else None})
+            return web.json_response({"items": rows(await database.get_game_jobs()), "employment": ({"job_id": employment["job_id"], "job_name": employment["job_name"], "description": employment["description"], "reward_coins": employment["reward_coins"], "rank_name": employment["rank_name"], "shifts_completed": employment["shifts_completed"], "last_shift_at": employment["last_shift_at"].isoformat() if employment["last_shift_at"] else None} if employment else None)})
         if action == "work_apply":
             try:
                 job_id = int(payload.get("job_id", 0))
