@@ -506,7 +506,7 @@ class Database:
 
     async def get_game_factions(self) -> list[asyncpg.Record]:
         return await self._require_pool().fetch(
-            """SELECT f.id, f.name, f.description, COUNT(m.user_id)::int AS members
+            """SELECT f.id, f.name, f.description, f.leader_id, COUNT(m.user_id)::int AS members
                FROM game_factions f LEFT JOIN game_faction_members m ON m.faction_id = f.id
                GROUP BY f.id ORDER BY f.id"""
         )
@@ -546,10 +546,20 @@ class Database:
                 return True, f"Ты вступил во фракцию «{faction['name']}»."
 
     async def leave_game_faction(self, user_id: int) -> bool:
-        result = await self._require_pool().execute(
-            "DELETE FROM game_faction_members WHERE user_id = $1", user_id
-        )
-        return result.endswith("1")
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                membership = await connection.fetchrow(
+                    """SELECT m.faction_id, f.leader_id
+                       FROM game_faction_members m JOIN game_factions f ON f.id = m.faction_id
+                       WHERE m.user_id = $1 FOR UPDATE OF m, f""", user_id
+                )
+                if membership is None or membership["leader_id"] == user_id:
+                    return False
+                result = await connection.execute(
+                    "DELETE FROM game_faction_members WHERE user_id = $1", user_id
+                )
+                return result.endswith("1")
 
     async def create_game_family(self, user_id: int, username: str, name: str) -> tuple[bool, str]:
         clean_name = " ".join(name.split()).strip()
