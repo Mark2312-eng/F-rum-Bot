@@ -381,8 +381,8 @@ class Database:
                 INSERT INTO game_transport_routes
                     (route_code, name, vehicle_type, fare, interval_minutes)
                 VALUES
-                    ('A1', 'Центральный маршрут', 'Автобус', 25, 15),
-                    ('A2', 'Северный маршрут', 'Автобус', 30, 20),
+                    ('A1', 'Центральный маршрут', 'Автобус', 20, 15),
+                    ('A2', 'Северный маршрут', 'Автобус', 20, 20),
                     ('T1', 'Городской трамвай', 'Трамвай', 20, 12)
                 ON CONFLICT (route_code) DO NOTHING;
                 INSERT INTO game_transport_stops (stop_code, name, district)
