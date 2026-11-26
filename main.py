@@ -242,21 +242,84 @@ async def webapp_index(_request: web.Request) -> web.StreamResponse:
     return web.FileResponse(page)
 
 
-async def webapp_me(request: web.Request) -> web.Response:
-    """Return the authenticated Telegram user's game profile."""
+async def webapp_api(request: web.Request) -> web.Response:
+    """Authenticated Mini App API for game data and safe player actions."""
     try:
         payload = await request.json()
     except (json.JSONDecodeError, ValueError):
         return web.json_response({"error": "Некорректный запрос"}, status=400)
-    init_data = payload.get("init_data", "") if isinstance(payload, dict) else ""
-    user = validate_telegram_init_data(str(init_data), os.getenv("TELEGRAM_BOT_TOKEN", "").strip())
+    if not isinstance(payload, dict):
+        return web.json_response({"error": "Некорректный запрос"}, status=400)
+    user = validate_telegram_init_data(
+        str(payload.get("init_data", "")),
+        os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
+    )
     if user is None:
         return web.json_response({"error": "Не удалось подтвердить Telegram. Откройте приложение из бота."}, status=401)
-    profile = await database.get_game_profile(user["id"], str(user.get("username") or user.get("first_name") or "Игрок"))
-    return web.json_response({
-        "user": {"id": user["id"], "first_name": user.get("first_name", ""), "username": user.get("username", "")},
-        "profile": {"coins": profile["coins"], "xp": profile["xp"], "reputation": profile["reputation"]},
-    })
+    user_id = user["id"]
+    username = str(user.get("username") or user.get("first_name") or "Игрок")[:64]
+    action = str(payload.get("action", "profile"))
+    def rows(data):
+        return [dict(item) for item in data]
+    try:
+        if action in {"profile", "me"}:
+            profile = await database.get_game_profile(user_id, username)
+            achievements = await database.sync_game_achievements(user_id)
+            return web.json_response({"user": {"id": user_id, "first_name": user.get("first_name", ""), "username": user.get("username", "")},
+                "profile": {"coins": profile["coins"], "xp": profile["xp"], "reputation": profile["reputation"], "daily_streak": profile["daily_streak"], "level": int(profile["xp"]) // 100 + 1},
+                "achievements": len(achievements)})
+        if action == "daily":
+            profile, reward, claimed = await database.claim_game_daily(user_id, username)
+            return web.json_response({"ok": claimed, "message": f"Получено: +{reward} монет и +50 XP." if claimed else "Ежедневная награда уже получена.", "profile": {"coins": profile["coins"], "xp": profile["xp"], "reputation": profile["reputation"], "daily_streak": profile["daily_streak"]}})
+        if action == "shop":
+            return web.json_response({"items": rows(await database.get_game_shop_items())})
+        if action == "inventory":
+            return web.json_response({"items": rows(await database.get_game_inventory(user_id))})
+        if action == "property":
+            owned = await database.get_game_property(user_id)
+            return web.json_response({"owned": dict(owned) if owned else None, "items": rows(await database.get_game_property_catalog())})
+        if action == "garage":
+            return web.json_response({"owned": rows(await database.get_game_vehicles(user_id)), "items": rows(await database.get_game_vehicle_catalog())})
+        if action == "factions":
+            return web.json_response({"items": rows(await database.get_game_factions()), "current": dict(await database.get_game_faction(user_id)) if await database.get_game_faction(user_id) else None})
+        if action == "family":
+            family = await database.get_game_family(user_id)
+            return web.json_response({"family": dict(family) if family else None})
+        if action == "jobs":
+            return web.json_response({"items": rows(await database.get_game_jobs())})
+        if action == "buy":
+            kind, code = str(payload.get("kind", "")), str(payload.get("code", ""))
+            if not code or len(code) > 64:
+                return web.json_response({"error": "Некорректный товар."}, status=400)
+            methods = {"item": database.buy_game_item, "property": database.buy_game_property, "vehicle": database.buy_game_vehicle}
+            if kind not in methods:
+                return web.json_response({"error": "Неизвестный тип покупки."}, status=400)
+            status, price = await methods[kind](user_id, username, code)
+            messages = {"ok": f"Покупка выполнена за {price} монет.", "funds": f"Недостаточно монет. Цена: {price}.", "owned": "У тебя уже есть недвижимость.", "limit": "Достигнут лимит транспорта.", "missing": "Товар больше недоступен."}
+            return web.json_response({"ok": status == "ok", "message": messages.get(status, "Покупка не выполнена."), "status": status})
+        if action == "join_faction":
+            try:
+                faction_id = int(payload.get("faction_id", 0))
+            except (TypeError, ValueError):
+                faction_id = 0
+            ok, message = await database.join_game_faction(user_id, username, faction_id)
+            return web.json_response({"ok": ok, "message": message})
+        if action == "leave_faction":
+            ok = await database.leave_game_faction(user_id)
+            return web.json_response({"ok": ok, "message": "Ты покинул фракцию." if ok else "Ты не состоишь во фракции."})
+        if action == "create_family":
+            name = str(payload.get("name", "")).strip()
+            if not 3 <= len(name) <= 32:
+                return web.json_response({"error": "Название семьи должно содержать от 3 до 32 символов."}, status=400)
+            ok, message = await database.create_game_family(user_id, username, name)
+            return web.json_response({"ok": ok, "message": message})
+        if action == "leave_family":
+            ok, message = await database.leave_game_family(user_id)
+            return web.json_response({"ok": ok, "message": message})
+        return web.json_response({"error": "Неизвестное действие."}, status=400)
+    except Exception:
+        LOGGER.exception("Mini App API action failed: %s", action)
+        return web.json_response({"error": "Не удалось выполнить действие. Попробуйте позже."}, status=500)
 
 
 async def start_web_server(port: int) -> web.AppRunner:
@@ -264,7 +327,7 @@ async def start_web_server(port: int) -> web.AppRunner:
     app = web.Application(client_max_size=16 * 1024)
     app.router.add_get("/", webapp_index)
     app.router.add_get("/health", health_check)
-    app.router.add_post("/api/webapp/me", webapp_me)
+    app.router.add_post("/api/webapp", webapp_api)
     runner = web.AppRunner(app, access_log=LOGGER)
     await runner.setup()
 
