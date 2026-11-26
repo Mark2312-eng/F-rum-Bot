@@ -9,7 +9,7 @@ from collections import defaultdict, deque
 
 from aiogram import Bot
 from aiogram.enums import ChatType
-from aiogram.types import Message
+from aiogram.types import ChatPermissions, Message
 
 URL_RE = re.compile(r"(?:https?://|www\.|t\.me/|telegram\.me/)", re.IGNORECASE)
 FLOOD_WINDOW_SECONDS = 8
@@ -126,7 +126,7 @@ async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
             await bot.restrict_chat_member(
                 message.chat.id,
                 target.id,
-                permissions={"can_send_messages": False},
+                permissions=ChatPermissions(can_send_messages=False),
                 until_date=int(time.time()) + 300,
             )
             _warnings[key] = 0
@@ -182,18 +182,18 @@ async def unmute_member(message: Message, bot: Bot, owner_id: int) -> None:
         await bot.restrict_chat_member(
             message.chat.id,
             target.id,
-            permissions={
-                "can_send_messages": True,
-                "can_send_audios": True,
-                "can_send_documents": True,
-                "can_send_photos": True,
-                "can_send_videos": True,
-                "can_send_video_notes": True,
-                "can_send_voice_notes": True,
-                "can_send_polls": True,
-                "can_send_other_messages": True,
-                "can_add_web_page_previews": True,
-            },
+            permissions=ChatPermissions(
+                can_send_messages=True,
+                can_send_audios=True,
+                can_send_documents=True,
+                can_send_photos=True,
+                can_send_videos=True,
+                can_send_video_notes=True,
+                can_send_voice_notes=True,
+                can_send_polls=True,
+                can_send_other_messages=True,
+                can_add_web_page_previews=True,
+            ),
         )
         await message.answer(f"🔊 Ограничение снято с {target.mention_html()}.", parse_mode="HTML")
     except Exception:
