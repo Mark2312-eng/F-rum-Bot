@@ -31,7 +31,8 @@ def format_factions(factions: list, current) -> str:
         lines.append(
             f"🏢 <b>{escape(item['name'])}</b>\n"
             f"{escape(item['description'])}\n"
-            f"👥 Участников: <b>{item['members']}</b>"
+            f"👥 Участников: <b>{item['members']}</b>\n"
+            f"👑 Лидер ID: <code>{item['leader_id'] or 'не назначен'}</code>"
         )
     if current:
         lines.extend([
@@ -146,3 +147,66 @@ async def handle_org_callback(callback) -> None:
         format_factions(factions, current), parse_mode="HTML",
         reply_markup=factions_keyboard(factions, current),
     )
+
+
+
+async def manage_faction(message: Message, command: CommandObject) -> None:
+    if not message.from_user:
+        return
+    parts = (command.args or "").split()
+    action = parts[0].lower() if parts else "info"
+    actor_id = message.from_user.id
+    if action == "claim" and len(parts) == 1:
+        ok, result = await database.claim_game_faction_leadership(actor_id)
+    elif action in {"promote", "demote", "kick", "transfer"} and len(parts) == 2:
+        try:
+            target_id = int(parts[1])
+            if target_id <= 0:
+                raise ValueError
+        except ValueError:
+            await message.answer("Укажи корректный числовой Telegram ID.")
+            return
+        if action == "promote":
+            ok, result = await database.change_game_faction_rank(actor_id, target_id, 1)
+        elif action == "demote":
+            ok, result = await database.change_game_faction_rank(actor_id, target_id, -1)
+        elif action == "kick":
+            ok, result = await database.remove_game_faction_member(actor_id, target_id)
+        else:
+            ok, result = await database.transfer_game_faction_leadership(actor_id, target_id)
+    elif action in {"info", "members"} and len(parts) == 1:
+        faction, members = await database.get_game_faction_roster(actor_id)
+        if faction is None:
+            await message.answer("Сначала вступи во фракцию через /factions.")
+            return
+        lines = [f"🏛 <b>{escape(faction['name'])}</b>", ""]
+        if action == "members":
+            lines.append("<b>Состав фракции</b>")
+            lines.extend(
+                f"• {escape(member['username'] or ('Игрок ' + str(member['user_id'])))} — "
+                f"{escape(member['rank_name'])} (ID <code>{member['user_id']}</code>)"
+                for member in members
+            )
+        else:
+            lines.append(
+                f"👑 Лидер: <code>{faction['leader_id']}</code>"
+                if faction["leader_id"] else "👑 Лидер пока не назначен."
+            )
+            lines.append(f"👥 Участников: {len(members)}")
+            lines.append("Ранги: Рекрут → Сотрудник → Старший → Заместитель → Лидер")
+        lines.extend([
+            "",
+            "<b>Управление лидера</b>",
+            "<code>/faction claim</code> — занять свободное лидерство",
+            "<code>/faction promote ID</code> — повысить участника",
+            "<code>/faction demote ID</code> — понизить участника",
+            "<code>/faction kick ID</code> — исключить участника",
+            "<code>/faction transfer ID</code> — передать лидерство",
+            "<code>/faction members</code> — состав фракции",
+        ])
+        await message.answer("\n".join(lines), parse_mode="HTML")
+        return
+    else:
+        await message.answer("Использование: /faction, /faction members, /faction claim, /faction promote ID, /faction demote ID, /faction kick ID, /faction transfer ID")
+        return
+    await message.answer(("✅ " if ok else "⚠️ ") + escape(result), parse_mode="HTML")

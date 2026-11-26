@@ -19,7 +19,7 @@ from moderation import moderate_message, mute_member, owner_summary, register_gr
 from group_settings import apply_setting_callback, show_group_settings
 from game import claim_daily_reward, handle_game_callback, show_achievements, show_game_profile, show_leaderboard
 from work import handle_work_callback, show_jobs, show_work
-from organizations import handle_org_callback, manage_family, show_factions
+from organizations import handle_org_callback, manage_family, manage_faction, show_factions
 from economy import handle_economy_callback, show_garage, show_inventory, show_properties, show_shop
 from city import handle_phone_callback, manage_city_event, show_city, show_events, show_phone, show_places
 from quests import handle_quest_callback, show_quests, show_reputation
@@ -522,6 +522,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(show_jobs, Command("jobs"))
     dispatcher.message.register(show_work, Command("work"))
     dispatcher.message.register(show_factions, Command("factions"))
+    dispatcher.message.register(manage_faction, Command("faction"))
     dispatcher.message.register(manage_family, Command("family"))
     dispatcher.message.register(show_shop, Command("shop"))
     dispatcher.message.register(show_inventory, Command("inventory"))
