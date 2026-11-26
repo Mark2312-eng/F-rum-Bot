@@ -14,6 +14,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from aiohttp import web
 from dotenv import load_dotenv
 
+from moderation import moderate_message, mute_member, owner_summary, register_group, registered_chat_count, unmute_member, warn_member
+
 load_dotenv()
 
 LOGGER = logging.getLogger(__name__)
@@ -138,14 +140,7 @@ def build_main_keyboard(forum_url: str) -> InlineKeyboardMarkup:
     """Create the main navigation keyboard."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="👤 Профиль игрока", callback_data="profile_help"),
-                InlineKeyboardButton(text="🛡️ Проверка наказания", callback_data="punish_help"),
-            ],
-            [
-                InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
-                InlineKeyboardButton(text="🎫 Поддержка", callback_data="support_soon"),
-            ],
+            [InlineKeyboardButton(text="⚙️ Панель владельца", callback_data="owner_panel")],
             [InlineKeyboardButton(text="🌐 Открыть форум", url=forum_url)],
         ]
     )
@@ -330,10 +325,9 @@ async def cmd_start(message: Message) -> None:
 
     await message.answer(
         "👋 <b>VISE RUSSIA | MOSCOW</b>\n\n"
-        "Бот-помощник форума. Выберите нужный раздел в меню ниже.\n\n"
-        "Команды:\n"
-        "/profile Ник — информация об игроке\n"
-        "/punish Ник — проверка статуса наказания",
+        "Бот управления и модерации Telegram-групп.\n\n"
+        "Добавьте бота в группу и выдайте права администратора.\n"
+        "Владелец может открыть панель командой /owner.",
         parse_mode="HTML",
         reply_markup=build_main_keyboard(forum_url),
     )
@@ -345,11 +339,14 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
     messages = {
         "profile_help": "Чтобы открыть профиль, отправьте команду:\n/profile Ник",
         "punish_help": "Чтобы проверить статус наказания, отправьте команду:\n/punish Ник",
-        "support_soon": "🎫 Система поддержки готовится к запуску.",
     }
     await callback.answer()
-    if callback.message and data == "stats":
-        await send_forum_stats(callback.message)
+    if callback.message and data == "owner_panel":
+        owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+        if callback.from_user.id != owner_id or owner_id <= 0:
+            await callback.message.answer("⛔ Панель доступна только владельцу бота.")
+        else:
+            await callback.message.answer(owner_summary(owner_id), parse_mode="HTML")
     elif callback.message and data in messages:
         await callback.message.answer(messages[data])
 
@@ -432,16 +429,72 @@ async def cmd_punish(message: Message) -> None:
     )
 
 
+async def cmd_owner(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id <= 0 or not message.from_user or message.from_user.id != owner_id:
+        await message.answer("⛔ Команда доступна только владельцу бота.")
+        return
+    await message.answer(owner_summary(owner_id), parse_mode="HTML")
+
+
+async def cmd_myid(message: Message) -> None:
+    if message.from_user:
+        await message.answer(f"Ваш Telegram ID: <code>{message.from_user.id}</code>", parse_mode="HTML")
+
+
+async def cmd_chats(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id <= 0 or not message.from_user or message.from_user.id != owner_id:
+        await message.answer("⛔ Команда доступна только владельцу бота.")
+        return
+    await message.answer(f"Подключено групп в текущем запуске: <b>{registered_chat_count()}</b>", parse_mode="HTML")
+
+
+async def group_register_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await register_group(message, bot, owner_id)
+
+
+async def group_moderation_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await moderate_message(message, bot, owner_id)
+
+
+async def group_warn_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await warn_member(message, bot, owner_id)
+
+
+async def group_mute_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await mute_member(message, bot, owner_id)
+
+
+async def group_unmute_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await unmute_member(message, bot, owner_id)
+
+
 def create_dispatcher() -> Dispatcher:
     """Configure and return the Telegram dispatcher."""
     dispatcher = Dispatcher()
     dispatcher.message.register(cmd_start, Command("start"))
     dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
-    dispatcher.callback_query.register(
-        cmd_menu_callback,
-        F.data.in_({"profile_help", "punish_help", "stats", "support_soon"}),
-    )
+    dispatcher.message.register(cmd_owner, Command("owner"))
+    dispatcher.message.register(cmd_myid, Command("myid"))
+    dispatcher.message.register(cmd_chats, Command("chats"))
+    dispatcher.message.register(group_register_handler, Command("connect"))
+    dispatcher.message.register(group_warn_handler, Command("warn"))
+    dispatcher.message.register(group_mute_handler, Command("mute"))
+    dispatcher.message.register(group_unmute_handler, Command("unmute"))
+    dispatcher.message.register(group_moderation_handler)
+    dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
     return dispatcher
 
 
