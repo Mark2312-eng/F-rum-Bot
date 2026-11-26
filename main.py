@@ -36,6 +36,7 @@ load_dotenv()
 LOGGER = logging.getLogger(__name__)
 DEFAULT_PORT = 10000
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15, connect=5, sock_read=10)
+PENDING_INPUTS: dict[int, str] = {}
 
 
 def get_port(value: str | None = None) -> int:
@@ -151,15 +152,50 @@ def build_profile_message(
     return "\n".join(lines)
 
 
-def build_main_keyboard(forum_url: str) -> InlineKeyboardMarkup:
-    """Create the main navigation keyboard."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🎮 Игровой профиль", callback_data="game:profile")],
-            [InlineKeyboardButton(text="⚙️ Панель владельца", callback_data="owner_panel")],
-            [InlineKeyboardButton(text="🌐 Открыть форум", url=forum_url)],
-        ]
-    )
+def build_main_keyboard(forum_url: str, is_owner: bool = False) -> InlineKeyboardMarkup:
+    """Create the button-first main navigation keyboard."""
+    rows = [
+        [InlineKeyboardButton(text="🎮 Игра", callback_data="menu:game"), InlineKeyboardButton(text="💼 Работа", callback_data="menu:work")],
+        [InlineKeyboardButton(text="🏛 Организации", callback_data="menu:organizations"), InlineKeyboardButton(text="💰 Экономика", callback_data="menu:economy")],
+        [InlineKeyboardButton(text="🏙 Город", callback_data="menu:city"), InlineKeyboardButton(text="📋 Задания", callback_data="menu:quests")],
+        [InlineKeyboardButton(text="🏆 Турниры", callback_data="menu:tournaments"), InlineKeyboardButton(text="🏢 Службы города", callback_data="menu:services")],
+        [InlineKeyboardButton(text="👤 Профиль игрока", callback_data="menu:profile")],
+        [InlineKeyboardButton(text="🛡 Проверить наказание", callback_data="menu:punish")],
+    ]
+    if is_owner:
+        rows.append([InlineKeyboardButton(text="⚙️ Панель владельца", callback_data="owner_panel")])
+    rows.append([InlineKeyboardButton(text="🌐 Открыть форум", url=forum_url)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_section_keyboard(section: str) -> InlineKeyboardMarkup:
+    """Build a submenu from supported button-driven features."""
+    sections = {
+        "game": [("👤 Игровой профиль", "view:game"), ("🎁 Ежедневная награда", "view:daily"), ("🏆 Рейтинг игроков", "view:top"), ("🎖 Достижения", "view:achievements")],
+        "work": [("💼 Моя работа", "view:work"), ("📋 Список вакансий", "view:jobs")],
+        "organizations": [("🏛 Список фракций", "view:factions"), ("⚔️ Управление фракцией", "input:faction"), ("👨‍👩‍👧 Семья", "input:family")],
+        "economy": [("🛒 Магазин", "view:shop"), ("🎒 Инвентарь", "view:inventory"), ("🏠 Недвижимость", "view:property"), ("🚗 Гараж", "view:garage")],
+        "city": [("📱 Телефон", "view:phone"), ("🗺 Карта города", "view:city"), ("📍 Места и организации", "view:places"), ("📅 События", "view:events"), ("📝 Запись на событие", "input:event")],
+        "quests": [("📋 Задания", "view:quests"), ("⭐ Репутация", "view:reputation")],
+        "tournaments": [("🏆 Турниры", "view:tournaments"), ("📝 Управление турниром", "input:tournament")],
+        "services": [("🏛 Госслужба", "input:gov"), ("🚓 Служба", "input:service"), ("🏥 Медицина", "input:med"), ("🎓 Образование", "input:edu"), ("🚌 Транспорт", "input:bus"), ("🚕 Такси", "input:taxi")],
+    }
+    rows = [[InlineKeyboardButton(text=label, callback_data=data)] for label, data in sections.get(section, [])]
+    rows.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_owner_keyboard() -> InlineKeyboardMarkup:
+    """Owner-only controls; authorization is rechecked for every callback."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Сводка", callback_data="owner:summary"), InlineKeyboardButton(text="👥 Подключённые группы", callback_data="owner:chats")],
+        [InlineKeyboardButton(text="🆔 Мой Telegram ID", callback_data="owner:myid")],
+        [InlineKeyboardButton(text="⚙️ Настройки группы", callback_data="owner:settings"), InlineKeyboardButton(text="📜 Журнал модерации", callback_data="owner:modlog")],
+        [InlineKeyboardButton(text="➕ Подключить эту группу", callback_data="owner:connect")],
+        [InlineKeyboardButton(text="⚠️ Предупредить", callback_data="owner:warn"), InlineKeyboardButton(text="🔇 Мут 10 мин", callback_data="owner:mute")],
+        [InlineKeyboardButton(text="🔊 Снять мут", callback_data="owner:unmute")],
+        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
+    ])
 
 
 async def health_check(_request: web.Request) -> web.Response:
@@ -343,29 +379,113 @@ async def cmd_start(message: Message) -> None:
         "👋 <b>VISE RUSSIA | MOSCOW</b>\n\n"
         "Бот управления и модерации Telegram-групп.\n\n"
         "Добавьте бота в группу и выдайте права администратора.\n"
-        "Владелец может открыть панель командой /owner.",
+        "Выберите нужный раздел с помощью кнопок ниже.",
         parse_mode="HTML",
-        reply_markup=build_main_keyboard(forum_url),
+        reply_markup=build_main_keyboard(forum_url, is_owner=bool(message.from_user and message.from_user.id == int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0"))),
     )
 
 
 async def cmd_menu_callback(callback: CallbackQuery) -> None:
-    """Handle menu shortcuts and clearly label features not released yet."""
+    """Route navigation and owner controls through inline buttons."""
     data = callback.data or ""
-    messages = {
-        "profile_help": "Чтобы открыть профиль, отправьте команду:\n/profile Ник",
-        "punish_help": "Чтобы проверить статус наказания, отправьте команду:\n/punish Ник",
+    await callback.answer()
+    message = callback.message
+    if message is None:
+        return
+    PENDING_INPUTS.pop(callback.from_user.id, None)
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+
+    if data == "owner_panel" or data.startswith("owner:"):
+        if owner_id <= 0 or callback.from_user.id != owner_id:
+            await message.answer("⛔ Панель доступна только владельцу бота.")
+            return
+        if data == "owner_panel":
+            count = await database.registered_chat_count()
+            await message.answer(owner_summary(owner_id, count), parse_mode="HTML", reply_markup=build_owner_keyboard())
+            return
+        action = data.split(":", 1)[1]
+        if action in {"warn", "mute", "unmute"}:
+            if message.chat.type == "private":
+                await message.answer("Откройте меню владельца прямо в подключённой группе, затем выберите действие модерации.", reply_markup=build_owner_keyboard())
+            else:
+                PENDING_INPUTS[callback.from_user.id] = f"mod_{action}"
+                await message.answer("Отправьте Telegram ID участника. Бот проверит права и выполнит действие.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✖️ Отмена", callback_data="input:cancel")]]))
+            return
+        if action in {"summary", "chats"}:
+            count = await database.registered_chat_count()
+            body = owner_summary(owner_id, count) if action == "summary" else f"👥 Подключено групп: <b>{count}</b>"
+            await message.answer(body, parse_mode="HTML", reply_markup=build_owner_keyboard())
+        elif action == "myid":
+            await message.answer(f"🆔 Ваш Telegram ID: <code>{owner_id}</code>", parse_mode="HTML", reply_markup=build_owner_keyboard())
+        elif message.chat.type == "private":
+            hints = {
+                "settings": "Откройте эту панель в нужной группе, чтобы изменить её настройки.",
+                "modlog": "Откройте эту панель в нужной группе, чтобы посмотреть журнал модерации.",
+                "connect": "Добавьте бота в нужную группу и нажмите «Подключить эту группу» прямо в ней.",
+            }
+            await message.answer(hints.get(action, "Это действие доступно внутри подключённой группы."), reply_markup=build_owner_keyboard())
+        elif action == "settings":
+            actor_message = message.model_copy(update={"from_user": callback.from_user})
+            await show_group_settings(actor_message, callback.bot, owner_id)
+        elif action == "modlog":
+            actor_message = message.model_copy(update={"from_user": callback.from_user})
+            await show_moderation_log(actor_message, callback.bot, owner_id)
+        elif action == "connect":
+            actor_message = message.model_copy(update={"from_user": callback.from_user})
+            await register_group(actor_message, callback.bot, owner_id)
+        return
+
+    if data.startswith("input:"):
+        action = data.split(":", 1)[1]
+        prompts = {
+            "faction": "Введите действие для фракции (например: info, members, claim, promote ID, demote ID, kick ID, transfer ID).",
+            "family": "Введите действие для семьи (например: info, create НАЗВАНИЕ, invite ID, kick ID).",
+            "tournament": "Введите действие (например: create Название 500, join ID, finish ID FAMILY_ID).",
+            "gov": "Введите действие госслужбы (например: departments, profile, join ID, salary, tasks).",
+            "service": "Введите действие службы (например: profile, apply МВД, tasks, leave).",
+            "med": "Введите действие медицины (например: profile, centers, apply ID, tasks, leave).",
+            "edu": "Введите действие образования (например: profile, institutions, groups, enroll ID).",
+            "bus": "Введите действие транспорта (например: routes, tickets, ticket 1, history).",
+            "taxi": "Введите действие такси (например: orders, order ROUTE FROM TO).",
+            "event": "Введите действие события (например: mine, join fair, leave fair).",
+        }
+        if action == "cancel":
+            await message.answer("Ввод отменён.")
+        elif action in prompts:
+            PENDING_INPUTS[callback.from_user.id] = action
+            await message.answer(prompts[action], reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✖️ Отмена", callback_data="input:cancel")]]))
+        return
+
+    if data == "menu:home":
+        await message.answer("Главное меню:", reply_markup=build_main_keyboard(get_forum_url(), is_owner=owner_id > 0 and callback.from_user.id == owner_id))
+    elif data.startswith("menu:"):
+        section = data.split(":", 1)[1]
+        prompts = {
+            "profile": "Для поиска профиля нажмите кнопку и затем отправьте ник игрока.",
+            "punish": "Для проверки статуса нажмите кнопку и затем отправьте ник игрока.",
+        }
+        if section in prompts:
+            PENDING_INPUTS[callback.from_user.id] = section
+            await message.answer(prompts[section])
+        else:
+            await message.answer("Выберите действие:", reply_markup=build_section_keyboard(section))
+
+
+async def cmd_view_callback(callback: CallbackQuery) -> None:
+    """Open read-only screens from the button menus."""
+    actions = {
+        "game": show_game_profile, "daily": claim_daily_reward, "top": show_leaderboard,
+        "achievements": show_achievements, "jobs": show_jobs, "work": show_work,
+        "factions": show_factions, "shop": show_shop, "inventory": show_inventory,
+        "property": show_properties, "garage": show_garage, "phone": show_phone,
+        "city": show_city, "places": show_places, "events": show_events,
+        "quests": show_quests, "reputation": show_reputation, "tournaments": show_tournaments,
     }
     await callback.answer()
-    if callback.message and data == "owner_panel":
-        owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
-        if callback.from_user.id != owner_id or owner_id <= 0:
-            await callback.message.answer("⛔ Панель доступна только владельцу бота.")
-        else:
-            chat_count = await database.registered_chat_count()
-            await callback.message.answer(owner_summary(owner_id, chat_count), parse_mode="HTML")
-    elif callback.message and data in messages:
-        await callback.message.answer(messages[data])
+    action = (callback.data or "").split(":", 1)[1]
+    if callback.message and action in actions:
+        actor_message = callback.message.model_copy(update={"from_user": callback.from_user})
+        await actions[action](actor_message)
 
 
 async def lookup_profile_for_message(message: Message) -> tuple[int, dict, str] | None:
@@ -517,51 +637,47 @@ async def group_unmute_handler(message: Message, bot: Bot) -> None:
         await unmute_member(message, bot, owner_id)
 
 
+async def button_input_handler(message: Message) -> None:
+    """Consume text input requested by a button and route it to the feature handler."""
+    if not message.from_user or not message.text:
+        return
+    action = PENDING_INPUTS.pop(message.from_user.id, None)
+    if not action:
+        return
+    if action in {"profile", "punish"}:
+        synthetic_message = message.model_copy(update={"text": f"/{action} {message.text.strip()}"})
+        await (cmd_profile if action == "profile" else cmd_punish)(synthetic_message)
+        return
+    from types import SimpleNamespace
+
+    handlers = {
+        "faction": manage_faction, "family": manage_family,
+        "tournament": manage_tournament, "gov": manage_government,
+        "service": manage_service, "med": manage_medical,
+        "edu": manage_education, "bus": manage_transport,
+        "taxi": manage_taxi, "event": manage_city_event,
+    }
+    if action in {"mod_warn", "mod_mute", "mod_unmute"}:
+        moderation_handlers = {"mod_warn": group_warn_handler, "mod_mute": group_mute_handler, "mod_unmute": group_unmute_handler}
+        await moderation_handlers[action](message, message.bot)
+        return
+    handler = handlers.get(action)
+    if handler:
+        await handler(message, SimpleNamespace(command=action, args=message.text.strip(), prefix="/", mention=None))
+
+
 def create_dispatcher() -> Dispatcher:
     """Configure and return the Telegram dispatcher."""
     dispatcher = Dispatcher()
+    # /start remains the technical entry point; all feature navigation uses buttons.
     dispatcher.message.register(cmd_start, Command("start"))
-    dispatcher.message.register(show_game_profile, Command("game"))
-    dispatcher.message.register(claim_daily_reward, Command("daily"))
-    dispatcher.message.register(show_leaderboard, Command("top"))
-    dispatcher.message.register(show_achievements, Command("achievements"))
-    dispatcher.message.register(show_jobs, Command("jobs"))
-    dispatcher.message.register(show_work, Command("work"))
-    dispatcher.message.register(show_factions, Command("factions"))
-    dispatcher.message.register(manage_faction, Command("faction"))
-    dispatcher.message.register(manage_family, Command("family"))
-    dispatcher.message.register(show_shop, Command("shop"))
-    dispatcher.message.register(show_inventory, Command("inventory"))
-    dispatcher.message.register(show_properties, Command("property"))
-    dispatcher.message.register(show_garage, Command("garage"))
-    dispatcher.message.register(show_phone, Command("phone"))
-    dispatcher.message.register(show_city, Command("city"))
-    dispatcher.message.register(show_places, Command("places"))
-    dispatcher.message.register(show_events, Command("events"))
-    dispatcher.message.register(manage_city_event, Command("event"))
-    dispatcher.message.register(show_quests, Command("quests"))
-    dispatcher.message.register(show_reputation, Command("reputation"))
-    dispatcher.message.register(show_tournaments, Command("tournaments"))
-    dispatcher.message.register(manage_tournament, Command("tournament"))
-    dispatcher.message.register(manage_government, Command("gov"))
-    dispatcher.message.register(manage_service, Command("service"))
-    dispatcher.message.register(manage_medical, Command("med"))
-    dispatcher.message.register(manage_education, Command("edu"))
-    dispatcher.message.register(manage_transport, Command("bus"))
-    dispatcher.message.register(manage_taxi, Command("taxi"))
-    dispatcher.message.register(cmd_profile, Command("profile"))
-    dispatcher.message.register(cmd_punish, Command("punish"))
-    dispatcher.message.register(cmd_owner, Command("owner"))
-    dispatcher.message.register(cmd_myid, Command("myid"))
-    dispatcher.message.register(cmd_chats, Command("chats"))
-    dispatcher.message.register(group_register_handler, Command("connect", ignore_mention=True))
-    dispatcher.message.register(group_settings_handler, Command("settings", ignore_mention=True))
-    dispatcher.message.register(group_modlog_handler, Command("modlog", ignore_mention=True))
-    dispatcher.message.register(group_warn_handler, Command("warn", ignore_mention=True))
-    dispatcher.message.register(group_mute_handler, Command("mute", ignore_mention=True))
-    dispatcher.message.register(group_unmute_handler, Command("unmute", ignore_mention=True))
+    dispatcher.message.register(button_input_handler, lambda message: bool(message.from_user and message.from_user.id in PENDING_INPUTS))
     dispatcher.message.register(group_moderation_handler)
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
+    dispatcher.callback_query.register(cmd_menu_callback, F.data.startswith("menu:"))
+    dispatcher.callback_query.register(cmd_menu_callback, F.data.startswith("owner:"))
+    dispatcher.callback_query.register(cmd_menu_callback, F.data.startswith("input:"))
+    dispatcher.callback_query.register(cmd_view_callback, F.data.startswith("view:"))
     dispatcher.callback_query.register(handle_game_callback, F.data.startswith("game:"))
     dispatcher.callback_query.register(handle_work_callback, F.data.startswith("work:"))
     dispatcher.callback_query.register(handle_org_callback, F.data.startswith("org:"))
@@ -593,6 +709,7 @@ async def main() -> None:
         LOGGER.info("PostgreSQL connection established")
         runner = await start_web_server(port)
         await bot.delete_webhook(drop_pending_updates=True)
+        await bot.delete_my_commands()
         await dispatcher.start_polling(bot)
     finally:
         if runner is not None:
