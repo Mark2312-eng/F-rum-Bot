@@ -5,7 +5,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 
-from main import build_player_message, find_forum_user, get_forum_url, get_port
+from main import (
+    build_main_keyboard,
+    build_player_message,
+    build_profile_message,
+    find_forum_user,
+    format_forum_date,
+    get_forum_url,
+    get_port,
+)
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -42,6 +50,53 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn(
             "https://forum.example/community/index.php?members/10/",
             message,
+        )
+
+
+class ProfileFormattingTests(unittest.TestCase):
+    def test_profile_message_contains_available_fields_and_escapes_html(self):
+        message = build_profile_message(
+            "<Admin>",
+            42,
+            {
+                "username": "<Admin>",
+                "user_title": "VIP & helper",
+                "message_count": 120,
+                "trophy_points": 15,
+                "is_banned": False,
+            },
+            "https://forum.example/",
+        )
+        self.assertIn("&lt;Admin&gt;", message)
+        self.assertIn("VIP &amp; helper", message)
+        self.assertIn("Сообщений:", message)
+        self.assertIn("Очки достижений:", message)
+        self.assertIn("🟢 Не забанен", message)
+
+    def test_profile_message_handles_missing_optional_fields(self):
+        message = build_profile_message(
+            "Player", 7, {"is_banned": True}, "https://forum.example/"
+        )
+        self.assertIn("ID: <code>7</code>", message)
+        self.assertIn("🔴 Забанен", message)
+        self.assertNotIn("Регистрация:", message)
+
+    def test_format_forum_date_rejects_invalid_values(self):
+        self.assertIsNone(format_forum_date(None))
+        self.assertIsNone(format_forum_date("not-a-date"))
+        self.assertIsNone(format_forum_date(True))
+
+    def test_main_keyboard_has_all_first_phase_sections(self):
+        keyboard = build_main_keyboard("https://forum.example/")
+        callbacks = {
+            button.callback_data
+            for row in keyboard.inline_keyboard
+            for button in row
+            if button.callback_data
+        }
+        self.assertEqual(
+            callbacks,
+            {"profile_help", "punish_help", "stats_soon", "support_soon"},
         )
 
 
