@@ -130,8 +130,46 @@ class Database:
                 VALUES
                     ('Правительство Москвы', 'Городские службы и управление городом.'),
                     ('Армия России', 'Военная организация игрового мира.'),
-                    ('ФСБ', 'Государственная служба безопасности игрового мира.')
+                    ('ФСБ', 'Государственная служба безопасности игрового мира.'),
+                    ('МВД', 'Полиция и общественная служба игрового мира.')
                 ON CONFLICT (name) DO NOTHING;
+                CREATE TABLE IF NOT EXISTS game_service_profiles (
+                    user_id BIGINT PRIMARY KEY REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    faction_id BIGINT NOT NULL REFERENCES game_factions(id) ON DELETE CASCADE,
+                    service_rank TEXT NOT NULL DEFAULT 'Стажёр',
+                    joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (user_id, faction_id)
+                );
+                CREATE INDEX IF NOT EXISTS game_service_faction_idx
+                    ON game_service_profiles (faction_id, service_rank);
+                CREATE TABLE IF NOT EXISTS game_service_missions (
+                    id BIGSERIAL PRIMARY KEY,
+                    faction_id BIGINT NOT NULL REFERENCES game_factions(id) ON DELETE CASCADE,
+                    code TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    reward_coins INTEGER NOT NULL CHECK (reward_coins > 0),
+                    reward_xp INTEGER NOT NULL CHECK (reward_xp >= 0),
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    UNIQUE (faction_id, code)
+                );
+                CREATE TABLE IF NOT EXISTS game_service_completions (
+                    user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    mission_id BIGINT NOT NULL REFERENCES game_service_missions(id) ON DELETE CASCADE,
+                    completed_on DATE NOT NULL DEFAULT CURRENT_DATE,
+                    completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (user_id, mission_id, completed_on)
+                );
+                INSERT INTO game_service_missions (faction_id, code, title, reward_coins, reward_xp)
+                SELECT f.id, m.code, m.title, m.reward_coins, m.reward_xp
+                FROM game_factions f
+                CROSS JOIN (VALUES
+                    ('briefing', 'Посетить игровое построение и ознакомиться с расписанием', 45, 15),
+                    ('report', 'Подготовить учебный отчёт для игрового руководителя', 60, 20),
+                    ('community', 'Помочь NPC на городском общественном мероприятии', 75, 25),
+                    ('training', 'Посетить учебное занятие и отметить участие', 55, 20)
+                ) AS m(code, title, reward_coins, reward_xp)
+                WHERE f.name IN ('МВД', 'ФСБ')
+                ON CONFLICT (faction_id, code) DO NOTHING;
                 CREATE TABLE IF NOT EXISTS game_inventory (
                     user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
                     item_code TEXT NOT NULL, quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
@@ -1380,6 +1418,151 @@ class Database:
                        WHERE user_id = $1 AND department_id = $2""", target_id, department_id
                 )
                 return True, "Начальник отдела назначен."
+
+
+    async def apply_game_service(self, user_id: int, faction_name: str) -> tuple[bool, str]:
+        allowed = {"МВД", "ФСБ"}
+        if faction_name not in allowed:
+            return False, "Выбери одну из игровых служб: МВД или ФСБ."
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                faction = await connection.fetchrow(
+                    "SELECT id FROM game_factions WHERE name = $1", faction_name
+                )
+                if faction is None:
+                    return False, "Игровая служба пока не создана."
+                member = await connection.fetchval(
+                    "SELECT 1 FROM game_faction_members WHERE faction_id = $1 AND user_id = $2",
+                    faction["id"], user_id
+                )
+                if not member:
+                    return False, f"Сначала вступи во фракцию «{faction_name}» через /factions."
+                current = await connection.fetchval(
+                    "SELECT faction_id FROM game_service_profiles WHERE user_id = $1", user_id
+                )
+                if current is not None:
+                    return False, "У тебя уже есть служебная карточка. Сначала выйди из текущей службы."
+                await connection.execute(
+                    """INSERT INTO game_service_profiles (user_id, faction_id)
+                       VALUES ($1, $2)""", user_id, faction["id"]
+                )
+                return True, f"Ты принят на службу в {faction_name}. Начальное звание: Стажёр."
+
+    async def leave_game_service(self, user_id: int) -> bool:
+        result = await self._require_pool().execute(
+            "DELETE FROM game_service_profiles WHERE user_id = $1", user_id
+        )
+        return result.endswith("1")
+
+    async def get_game_service_profile(self, user_id: int) -> asyncpg.Record | None:
+        return await self._require_pool().fetchrow(
+            """SELECT p.user_id, p.service_rank, p.joined_at, f.name AS faction_name,
+                      f.leader_id, gp.username
+               FROM game_service_profiles p
+               JOIN game_factions f ON f.id = p.faction_id
+               JOIN game_players gp ON gp.user_id = p.user_id
+               WHERE p.user_id = $1""", user_id
+        )
+
+    async def change_game_service_rank(self, actor_id: int, target_id: int, direction: int) -> tuple[bool, str]:
+        ranks = ["Стажёр", "Сотрудник", "Старший сотрудник", "Заместитель руководителя", "Руководитель"]
+        if direction not in (-1, 1) or actor_id == target_id:
+            return False, "Некорректная цель изменения звания."
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                actor = await connection.fetchrow(
+                    """SELECT f.id AS faction_id, f.leader_id
+                       FROM game_service_profiles p
+                       JOIN game_factions f ON f.id = p.faction_id
+                       WHERE p.user_id = $1 FOR UPDATE OF f""", actor_id
+                )
+                if actor is None or actor["leader_id"] != actor_id:
+                    return False, "Изменять служебные звания может только лидер фракции."
+                target = await connection.fetchrow(
+                    """SELECT service_rank FROM game_service_profiles
+                       WHERE user_id = $1 AND faction_id = $2 FOR UPDATE""",
+                    target_id, actor["faction_id"]
+                )
+                if target is None:
+                    return False, "Игрок не состоит на службе в твоей фракции."
+                try:
+                    index = ranks.index(target["service_rank"])
+                except ValueError:
+                    index = 0
+                next_index = index + direction
+                if next_index < 0 or next_index >= len(ranks) - 1:
+                    return False, "Достигнут предел звания. Лидерство определяется отдельно."
+                await connection.execute(
+                    "UPDATE game_service_profiles SET service_rank = $1 WHERE user_id = $2",
+                    ranks[next_index], target_id
+                )
+                return True, f"Новое служебное звание: {ranks[next_index]}."
+
+    async def list_game_service_missions(self, user_id: int) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT m.code, m.title, m.reward_coins, m.reward_xp,
+                      EXISTS (
+                        SELECT 1 FROM game_service_completions c
+                        WHERE c.user_id = $1 AND c.mission_id = m.id
+                          AND c.completed_on = CURRENT_DATE
+                      ) AS completed_today
+               FROM game_service_profiles p
+               JOIN game_service_missions m ON m.faction_id = p.faction_id
+               WHERE p.user_id = $1 AND m.active = TRUE
+               ORDER BY m.id""", user_id
+        )
+
+    async def complete_game_service_mission(self, user_id: int, code: str) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                mission = await connection.fetchrow(
+                    """SELECT m.id, m.reward_coins, m.reward_xp
+                       FROM game_service_profiles p
+                       JOIN game_service_missions m ON m.faction_id = p.faction_id
+                       WHERE p.user_id = $1 AND m.code = $2 AND m.active = TRUE
+                       FOR UPDATE OF p""", user_id, code
+                )
+                if mission is None:
+                    return False, "Поручение не найдено для твоей службы. Используй /service tasks."
+                inserted = await connection.fetchval(
+                    """INSERT INTO game_service_completions (user_id, mission_id, completed_on)
+                       VALUES ($1, $2, CURRENT_DATE)
+                       ON CONFLICT DO NOTHING RETURNING user_id""",
+                    user_id, mission["id"]
+                )
+                if inserted is None:
+                    return False, "Это поручение уже засчитано сегодня."
+                await connection.execute(
+                    """UPDATE game_players SET coins = coins + $1, xp = xp + $2,
+                       updated_at = NOW() WHERE user_id = $3""",
+                    mission["reward_coins"], mission["reward_xp"], user_id
+                )
+                return True, f"Задание засчитано: +{mission['reward_coins']} монет и +{mission['reward_xp']} XP."
+
+    async def get_game_service_roster(self, user_id: int) -> tuple[asyncpg.Record | None, list[asyncpg.Record]]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            faction = await connection.fetchrow(
+                """SELECT f.id, f.name, f.leader_id FROM game_service_profiles p
+                   JOIN game_factions f ON f.id = p.faction_id
+                   WHERE p.user_id = $1""", user_id
+            )
+            if faction is None:
+                return None, []
+            members = await connection.fetch(
+                """SELECT p.user_id, p.service_rank, gp.username
+                   FROM game_service_profiles p
+                   JOIN game_players gp ON gp.user_id = p.user_id
+                   WHERE p.faction_id = $1
+                   ORDER BY CASE p.service_rank
+                     WHEN 'Руководитель' THEN 0 WHEN 'Заместитель руководителя' THEN 1
+                     WHEN 'Старший сотрудник' THEN 2 WHEN 'Сотрудник' THEN 3 ELSE 4 END,
+                     p.joined_at LIMIT 100""", faction["id"]
+            )
+            return faction, members
 
 
 database = Database()
