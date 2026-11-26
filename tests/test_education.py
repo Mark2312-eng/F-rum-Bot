@@ -45,6 +45,8 @@ class EducationFormattingTests(unittest.TestCase):
             "institution_name": "<Университет>",
             "institution_type": "Университет",
             "district": "Центр",
+            "group_name": "Группа А-01",
+            "group_code": "A-01",
             "user_id": 123,
         })
         self.assertIn("&lt;Университет&gt;", rendered)
@@ -67,7 +69,7 @@ class EducationFormattingTests(unittest.TestCase):
     def test_roster_escapes_student_names(self):
         rendered = format_education_roster(
             {"name": "<Колледж>"},
-            [{"username": "<Ученик>", "user_id": 456}],
+            [{"username": "<Ученик>", "user_id": 456, "group_code": "A-01"}],
         )
         self.assertIn("&lt;Колледж&gt;", rendered)
         self.assertIn("&lt;Ученик&gt;", rendered)
