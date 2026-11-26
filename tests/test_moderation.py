@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from moderation import contains_link, owner_summary
+from group_settings import FLOOD_LABELS, LINK_LABELS, settings_keyboard, settings_text
 
 
 class ModerationUnitTests(unittest.TestCase):
@@ -24,6 +25,25 @@ class ModerationUnitTests(unittest.TestCase):
         self.assertIn("7", summary)
         self.assertIn("/warn", summary)
         self.assertNotIn("TOKEN", summary)
+
+    def test_settings_labels_cover_supported_values(self):
+        self.assertEqual(set(FLOOD_LABELS), {"off", "balanced", "strict"})
+        self.assertEqual(set(LINK_LABELS), {"allow", "block", "mute"})
+
+    def test_settings_text_displays_current_values(self):
+        rendered = settings_text({"moderation_mode": "strict", "link_policy": "mute"})
+        self.assertIn(FLOOD_LABELS["strict"], rendered)
+        self.assertIn(LINK_LABELS["mute"], rendered)
+
+    def test_settings_keyboard_contains_all_options(self):
+        keyboard = settings_keyboard("balanced", "block")
+        callback_data = {
+            button.callback_data
+            for row in keyboard.inline_keyboard
+            for button in row
+        }
+        self.assertIn("cfg:flood:strict", callback_data)
+        self.assertIn("cfg:links:mute", callback_data)
 
 
 class PersistentModerationTests(unittest.IsolatedAsyncioTestCase):
