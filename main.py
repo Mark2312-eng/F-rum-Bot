@@ -22,6 +22,7 @@ from work import handle_work_callback, show_jobs, show_work
 from organizations import handle_org_callback, manage_family, show_factions
 from economy import handle_economy_callback, show_garage, show_inventory, show_properties, show_shop
 from city import handle_phone_callback, show_city, show_events, show_phone, show_places
+from quests import handle_quest_callback, show_quests, show_reputation
 
 load_dotenv()
 
@@ -529,6 +530,8 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(show_city, Command("city"))
     dispatcher.message.register(show_places, Command("places"))
     dispatcher.message.register(show_events, Command("events"))
+    dispatcher.message.register(show_quests, Command("quests"))
+    dispatcher.message.register(show_reputation, Command("reputation"))
     dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
     dispatcher.message.register(cmd_owner, Command("owner"))
@@ -547,6 +550,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.callback_query.register(handle_org_callback, F.data.startswith("org:"))
     dispatcher.callback_query.register(handle_economy_callback, F.data.startswith("eco:"))
     dispatcher.callback_query.register(handle_phone_callback, F.data.startswith("phone:"))
+    dispatcher.callback_query.register(handle_quest_callback, F.data.startswith("quest:"))
     dispatcher.callback_query.register(group_setting_callback, F.data.startswith("cfg:"))
     return dispatcher
 
