@@ -509,6 +509,10 @@ class Database:
         pool = self._require_pool()
         async with pool.acquire() as connection:
             async with connection.transaction():
+                await connection.execute(
+                    "INSERT INTO game_players (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING",
+                    user_id,
+                )
                 existing = await connection.fetchval(
                     "SELECT family_id FROM game_family_members WHERE user_id = $1 FOR UPDATE",
                     user_id,
