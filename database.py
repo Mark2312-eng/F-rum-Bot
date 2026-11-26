@@ -520,14 +520,16 @@ class Database:
                 if existing is not None:
                     return False, "Ты уже состоишь в семье. Сначала выйди из неё."
                 family = await connection.fetchrow(
-                    """SELECT f.id, f.name, COUNT(m.user_id)::int AS members
-                       FROM game_families f LEFT JOIN game_family_members m ON m.family_id = f.id
-                       WHERE f.id = $1 GROUP BY f.id FOR UPDATE OF f""",
+                    "SELECT id, name FROM game_families WHERE id = $1 FOR UPDATE",
                     family_id,
                 )
                 if family is None:
                     return False, "Семья не найдена."
-                if family["members"] >= 10:
+                member_count = await connection.fetchval(
+                    "SELECT COUNT(*) FROM game_family_members WHERE family_id = $1",
+                    family_id,
+                )
+                if member_count >= 10:
                     return False, "В семье уже максимальное количество участников (10)."
                 await connection.execute(
                     """INSERT INTO game_family_members (family_id, user_id)
