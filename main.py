@@ -159,7 +159,7 @@ async def cmd_start(message: Message) -> None:
         "👋 Здравствуйте! Это официальный бот проекта "
         "<b>VISE RUSSIA | MOSCOW</b>.\n\n"
         "Доступные команды:\n"
-        "/punish <ник> — Проверить статус бана игрока на форуме",
+        "/punish &lt;ник&gt; — Проверить статус бана игрока на форуме",
         parse_mode="HTML",
     )
 
