@@ -23,7 +23,7 @@ class CityFormattingTests(unittest.TestCase):
         self.assertIn("Городская ярмарка", rendered)
         self.assertIn("27.11.2026 02:00 UTC", rendered)
         self.assertIn("игровые события", rendered)
-        self.assertIn("\\nКод записи", rendered)
+        self.assertIn("\nКод записи", rendered)
 
 
 if __name__ == "__main__":
