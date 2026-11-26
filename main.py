@@ -425,11 +425,14 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
             }
             await message.answer(hints.get(action, "Это действие доступно внутри подключённой группы."), reply_markup=build_owner_keyboard())
         elif action == "settings":
-            await show_group_settings(message, callback.bot, owner_id)
+            actor_message = message.model_copy(update={"from_user": callback.from_user})
+            await show_group_settings(actor_message, callback.bot, owner_id)
         elif action == "modlog":
-            await show_moderation_log(message, callback.bot, owner_id)
+            actor_message = message.model_copy(update={"from_user": callback.from_user})
+            await show_moderation_log(actor_message, callback.bot, owner_id)
         elif action == "connect":
-            await register_group(message, callback.bot, owner_id)
+            actor_message = message.model_copy(update={"from_user": callback.from_user})
+            await register_group(actor_message, callback.bot, owner_id)
         return
 
     if data.startswith("input:"):
@@ -481,7 +484,8 @@ async def cmd_view_callback(callback: CallbackQuery) -> None:
     await callback.answer()
     action = (callback.data or "").split(":", 1)[1]
     if callback.message and action in actions:
-        await actions[action](callback.message)
+        actor_message = callback.message.model_copy(update={"from_user": callback.from_user})
+        await actions[action](actor_message)
 
 
 async def lookup_profile_for_message(message: Message) -> tuple[int, dict, str] | None:
