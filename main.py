@@ -282,7 +282,7 @@ async def webapp_api(request: web.Request) -> web.Response:
             return web.json_response({"owned": [{"id": v["id"], "name": v["name"], "description": v["description"]} for v in await database.get_game_vehicles(user_id)], "items": rows(await database.get_game_vehicle_catalog())})
         if action == "factions":
             current = await database.get_game_faction(user_id)
-            return web.json_response({"items": rows(await database.get_game_factions()), "current": dict(current) if current else None})
+            return web.json_response({"items": rows(await database.get_game_factions()), "current": ({**dict(current), "joined_at": current["joined_at"].isoformat() if current["joined_at"] else None} if current else None)})
         if action == "family":
             family = await database.get_game_family(user_id)
             members = await database.get_game_family_members(int(family["id"])) if family else []
