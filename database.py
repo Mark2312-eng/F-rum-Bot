@@ -292,14 +292,15 @@ class Database:
         pool = self._require_pool()
         await pool.execute(
             """INSERT INTO game_achievements (user_id, achievement_code)
-               SELECT user_id, code FROM game_players
-               CROSS JOIN (VALUES
-                   ('first_steps', xp >= 50),
-                   ('experienced', xp >= 500),
-                   ('wealthy', coins >= 1000),
-                   ('reputation', reputation >= 100)
+               SELECT game_players.user_id, achievements.code
+               FROM game_players
+               CROSS JOIN LATERAL (VALUES
+                   ('first_steps', game_players.xp >= 50),
+                   ('experienced', game_players.xp >= 500),
+                   ('wealthy', game_players.coins >= 1000),
+                   ('reputation', game_players.reputation >= 100)
                ) AS achievements(code, achieved)
-               WHERE user_id = $1 AND achieved
+               WHERE game_players.user_id = $1 AND achievements.achieved
                ON CONFLICT (user_id, achievement_code) DO NOTHING""",
             user_id,
         )
