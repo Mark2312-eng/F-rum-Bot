@@ -85,9 +85,6 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
             return
         try:
             await message.delete()
-            await database.log_moderation_event(
-                message.chat.id, None, message.from_user.id, "link_deleted"
-            )
             if policy == "mute":
                 await bot.restrict_chat_member(
                     message.chat.id,
@@ -103,6 +100,9 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
                     parse_mode="HTML",
                 )
             else:
+                await database.log_moderation_event(
+                    message.chat.id, None, message.from_user.id, "link_deleted"
+                )
                 await message.answer(
                     f"⚠️ {message.from_user.mention_html()}, ссылки в этой группе разрешены только администраторам.",
                     parse_mode="HTML",
@@ -263,7 +263,7 @@ MODERATION_ACTION_LABELS = {
 
 def format_moderation_log(events: list) -> str:
     if not events:
-        return "📋 <b>Журнал модерации</b>\\n\\nСобытий пока нет."
+        return "📋 <b>Журнал модерации</b>\n\nСобытий пока нет."
     lines = ["📋 <b>Последние события модерации</b>", ""]
     for event in events:
         action = MODERATION_ACTION_LABELS.get(event["action"], "Действие модерации")
@@ -277,9 +277,9 @@ def format_moderation_log(events: list) -> str:
         actor_text = f" · модератор <code>{actor_id}</code>" if actor_id else ""
         lines.append(
             f"• <b>{action}</b> — <code>{target_id if target_id is not None else '—'}</code>"
-            f"{details}{actor_text}\\n  <i>{time_text}</i>"
+            f"{details}{actor_text}\n  <i>{time_text}</i>"
         )
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 async def show_moderation_log(message: Message, bot: Bot, owner_id: int) -> None:
