@@ -25,8 +25,14 @@ class Database:
                     chat_id BIGINT PRIMARY KEY,
                     title TEXT NOT NULL DEFAULT '',
                     connected_by BIGINT NOT NULL,
+                    moderation_mode TEXT NOT NULL DEFAULT 'balanced',
+                    link_policy TEXT NOT NULL DEFAULT 'block',
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+                ALTER TABLE registered_chats
+                    ADD COLUMN IF NOT EXISTS moderation_mode TEXT NOT NULL DEFAULT 'balanced';
+                ALTER TABLE registered_chats
+                    ADD COLUMN IF NOT EXISTS link_policy TEXT NOT NULL DEFAULT 'block';
                 CREATE TABLE IF NOT EXISTS moderation_warnings (
                     chat_id BIGINT NOT NULL,
                     user_id BIGINT NOT NULL,
