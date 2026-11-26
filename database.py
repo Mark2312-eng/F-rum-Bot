@@ -131,6 +131,45 @@ class Database:
                     ('Механик', 'Обслуживание и ремонт транспорта.', 'Стажёр', 100),
                     ('Работник мэрии', 'Помощь городским службам.', 'Стажёр', 110)
                 ON CONFLICT (name) DO NOTHING;
+                CREATE TABLE IF NOT EXISTS game_shop_items (
+                    code TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                    price INTEGER NOT NULL CHECK (price >= 0), active BOOLEAN NOT NULL DEFAULT TRUE
+                );
+                INSERT INTO game_shop_items (code, name, description, price)
+                VALUES
+                    ('water', 'Вода', 'Восстанавливает силы персонажа в будущих игровых механиках.', 25),
+                    ('snack', 'Перекус', 'Небольшой запас еды для персонажа.', 40),
+                    ('toolkit', 'Набор инструментов', 'Полезный предмет для игровых профессий.', 250),
+                    ('first_aid', 'Аптечка', 'Предмет первой помощи в игровом инвентаре.', 180)
+                ON CONFLICT (code) DO NOTHING;
+                CREATE TABLE IF NOT EXISTS game_property_catalog (
+                    code TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                    price INTEGER NOT NULL CHECK (price >= 0), active BOOLEAN NOT NULL DEFAULT TRUE
+                );
+                INSERT INTO game_property_catalog (code, name, description, price)
+                VALUES
+                    ('room', 'Комната', 'Небольшое личное жильё.', 2500),
+                    ('apartment', 'Квартира', 'Уютная городская квартира.', 12000),
+                    ('house', 'Дом', 'Отдельный жилой дом.', 45000)
+                ON CONFLICT (code) DO NOTHING;
+                CREATE TABLE IF NOT EXISTS game_vehicle_catalog (
+                    code TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                    price INTEGER NOT NULL CHECK (price >= 0), active BOOLEAN NOT NULL DEFAULT TRUE
+                );
+                INSERT INTO game_vehicle_catalog (code, name, description, price)
+                VALUES
+                    ('bicycle', 'Велосипед', 'Простой городской транспорт.', 900),
+                    ('scooter', 'Скутер', 'Компактный двухколёсный транспорт.', 4500),
+                    ('sedan', 'Седан', 'Личный городской автомобиль.', 18000),
+                    ('suv', 'Внедорожник', 'Просторный автомобиль.', 32000)
+                ON CONFLICT (code) DO NOTHING;
+                CREATE TABLE IF NOT EXISTS game_vehicles (
+                    id BIGSERIAL PRIMARY KEY,
+                    owner_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    vehicle_code TEXT NOT NULL REFERENCES game_vehicle_catalog(code),
+                    purchased_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS game_vehicles_owner_idx ON game_vehicles (owner_id, purchased_at DESC);
                 CREATE TABLE IF NOT EXISTS game_events (
                     id BIGSERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
                     starts_at TIMESTAMPTZ NOT NULL, ends_at TIMESTAMPTZ,
@@ -565,6 +604,147 @@ class Database:
                WHERE m.user_id = $1""",
             user_id,
         )
+
+
+    async def get_game_shop_items(self) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            "SELECT code, name, description, price FROM game_shop_items WHERE active = TRUE ORDER BY price"
+        )
+
+    async def get_game_inventory(self, user_id: int) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT i.item_code, i.quantity, s.name, s.description
+               FROM game_inventory i LEFT JOIN game_shop_items s ON s.code = i.item_code
+               WHERE i.user_id = $1 ORDER BY i.item_code""",
+            user_id,
+        )
+
+    async def buy_game_item(self, user_id: int, username: str, code: str) -> tuple[str, int]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                    user_id, username[:64],
+                )
+                player = await connection.fetchrow(
+                    "SELECT coins FROM game_players WHERE user_id = $1 FOR UPDATE", user_id
+                )
+                item = await connection.fetchrow(
+                    "SELECT price FROM game_shop_items WHERE code = $1 AND active = TRUE", code
+                )
+                if item is None:
+                    return "missing", 0
+                price = int(item["price"])
+                if int(player["coins"]) < price:
+                    return "funds", price
+                await connection.execute(
+                    "UPDATE game_players SET coins = coins - $2, updated_at = NOW() WHERE user_id = $1",
+                    user_id, price,
+                )
+                await connection.execute(
+                    """INSERT INTO game_inventory (user_id, item_code, quantity)
+                       VALUES ($1, $2, 1)
+                       ON CONFLICT (user_id, item_code)
+                       DO UPDATE SET quantity = game_inventory.quantity + 1""",
+                    user_id, code,
+                )
+                return "ok", price
+
+    async def get_game_property_catalog(self) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            "SELECT code, name, description, price FROM game_property_catalog WHERE active = TRUE ORDER BY price"
+        )
+
+    async def get_game_property(self, user_id: int) -> asyncpg.Record | None:
+        return await self._require_pool().fetchrow(
+            "SELECT id, property_type, name, created_at FROM game_properties WHERE owner_id = $1 ORDER BY id LIMIT 1",
+            user_id,
+        )
+
+    async def buy_game_property(self, user_id: int, username: str, code: str) -> tuple[str, int]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                    user_id, username[:64],
+                )
+                player = await connection.fetchrow(
+                    "SELECT coins FROM game_players WHERE user_id = $1 FOR UPDATE", user_id
+                )
+                owned = await connection.fetchval(
+                    "SELECT id FROM game_properties WHERE owner_id = $1 LIMIT 1", user_id
+                )
+                if owned is not None:
+                    return "owned", 0
+                item = await connection.fetchrow(
+                    "SELECT name, price FROM game_property_catalog WHERE code = $1 AND active = TRUE", code
+                )
+                if item is None:
+                    return "missing", 0
+                price = int(item["price"])
+                if int(player["coins"]) < price:
+                    return "funds", price
+                await connection.execute(
+                    "UPDATE game_players SET coins = coins - $2, updated_at = NOW() WHERE user_id = $1",
+                    user_id, price,
+                )
+                await connection.execute(
+                    "INSERT INTO game_properties (owner_id, property_type, name) VALUES ($1, $2, $3)",
+                    user_id, code, item["name"],
+                )
+                return "ok", price
+
+    async def get_game_vehicle_catalog(self) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            "SELECT code, name, description, price FROM game_vehicle_catalog WHERE active = TRUE ORDER BY price"
+        )
+
+    async def get_game_vehicles(self, user_id: int) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT v.id, c.name, c.description, v.purchased_at
+               FROM game_vehicles v JOIN game_vehicle_catalog c ON c.code = v.vehicle_code
+               WHERE v.owner_id = $1 ORDER BY v.purchased_at DESC""",
+            user_id,
+        )
+
+    async def buy_game_vehicle(self, user_id: int, username: str, code: str) -> tuple[str, int]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                    user_id, username[:64],
+                )
+                player = await connection.fetchrow(
+                    "SELECT coins FROM game_players WHERE user_id = $1 FOR UPDATE", user_id
+                )
+                count = await connection.fetchval(
+                    "SELECT COUNT(*) FROM game_vehicles WHERE owner_id = $1", user_id
+                )
+                if count >= 3:
+                    return "limit", 0
+                item = await connection.fetchrow(
+                    "SELECT price FROM game_vehicle_catalog WHERE code = $1 AND active = TRUE", code
+                )
+                if item is None:
+                    return "missing", 0
+                price = int(item["price"])
+                if int(player["coins"]) < price:
+                    return "funds", price
+                await connection.execute(
+                    "UPDATE game_players SET coins = coins - $2, updated_at = NOW() WHERE user_id = $1",
+                    user_id, price,
+                )
+                await connection.execute(
+                    "INSERT INTO game_vehicles (owner_id, vehicle_code) VALUES ($1, $2)",
+                    user_id, code,
+                )
+                return "ok", price
 
 
 
