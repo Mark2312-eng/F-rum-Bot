@@ -47,7 +47,7 @@ class GameFormattingTests(unittest.TestCase):
         self.assertIn("Достижений: <b>1</b>", rendered)
 
     def test_leaderboard_empty_state(self):
-        self.assertIn("никто не создал", format_leaderboard([]))
+        self.assertIn("Пока нет игровых профилей.", format_leaderboard([]))
 
     def test_leaderboard_escapes_names_and_calculates_levels(self):
         rendered = format_leaderboard([
