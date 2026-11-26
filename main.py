@@ -1,15 +1,16 @@
-"""Telegram bot for querying player moderation status on a XenForo."""
+"""Telegram bot for querying player information on a XenForo forum."""
 
 import asyncio
 import logging
 import os
+from datetime import datetime, timezone
 from html import escape
 from urllib.parse import urljoin, urlsplit
 
 import aiohttp
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiohttp import web
 from dotenv import load_dotenv
 
@@ -73,6 +74,80 @@ def build_player_message(
         f"🛡️ Статус бана: {ban_status}\n"
         f'🔗 <a href="{escape(profile_url, quote=True)}">'
         "Открыть профиль на форуме</a>"
+    )
+
+
+def format_forum_date(value: object) -> str | None:
+    """Format a XenForo Unix timestamp without failing on missing data."""
+    if isinstance(value, bool):
+        return None
+    try:
+        timestamp = int(value)
+        if timestamp <= 0:
+            return None
+        return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime(
+            "%d.%m.%Y %H:%M UTC"
+        )
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def build_profile_message(
+    requested_name: str, user_id: int, profile: dict, forum_url: str
+) -> str:
+    """Build a profile summary using only fields returned by XenForo."""
+    username = str(profile.get("username") or requested_name)
+    title = profile.get("user_title")
+    profile_url = urljoin(forum_url, f"index.php?members/{user_id}/")
+    lines = [
+        f"👤 <b>Профиль игрока: {escape(username)}</b>",
+        f"🆔 ID: <code>{user_id}</code>",
+    ]
+
+    if title:
+        lines.append(f"🏷️ Статус: {escape(str(title))}")
+
+    registered = format_forum_date(profile.get("register_date"))
+    if registered:
+        lines.append(f"📅 Регистрация: {registered}")
+
+    if profile.get("message_count") is not None:
+        lines.append(f"💬 Сообщений: <b>{escape(str(profile['message_count']))}</b>")
+
+    if profile.get("trophy_points") is not None:
+        lines.append(f"🏆 Очки достижений: <b>{escape(str(profile['trophy_points']))}</b>")
+
+    last_activity = format_forum_date(profile.get("last_activity"))
+    if last_activity:
+        lines.append(f"🕒 Последняя активность: {last_activity}")
+
+    lines.append(
+        "🛡️ Наказание: "
+        + ("🔴 Забанен" if bool(profile.get("is_banned", False)) else "🟢 Не забанен")
+    )
+    lines.extend(
+        [
+            "",
+            f'🔗 <a href="{escape(profile_url, quote=True)}">Открыть профиль на форуме</a>',
+        ]
+    )
+    return "\n".join(lines)
+
+
+def build_main_keyboard(forum_url: str) -> InlineKeyboardMarkup:
+    """Create the main navigation keyboard."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="👤 Профиль игрока", callback_data="profile_help"),
+                InlineKeyboardButton(text="🛡️ Проверка наказания", callback_data="punish_help"),
+            ],
+            [
+                InlineKeyboardButton(text="📊 Статистика", callback_data="stats_soon"),
+                InlineKeyboardButton(text="🎫 Поддержка", callback_data="support_soon"),
+            ],
+            [InlineKeyboardButton(text="🌐 Открыть форум", url=forum_url)],
+        ]
     )
 
 
@@ -146,7 +221,6 @@ async def find_forum_user(
     if not isinstance(profile_data, dict):
         raise ValueError("Unexpected XenForo profile response")
 
-    # XenForo GET /users/:id returns the profile under the "user" key.
     profile = profile_data.get("user")
     if not isinstance(profile, dict):
         raise ValueError("XenForo profile response does not contain a user object")
@@ -155,12 +229,87 @@ async def find_forum_user(
 
 
 async def cmd_start(message: Message) -> None:
+    try:
+        forum_url = get_forum_url()
+    except ValueError:
+        LOGGER.exception("XF_URL configuration is invalid")
+        await message.answer("⚠️ Сервис временно недоступен: неверно настроен адрес форума.")
+        return
+
     await message.answer(
-        "👋 Здравствуйте! Это официальный бот проекта "
-        "<b>VISE RUSSIA | MOSCOW</b>.\n\n"
-        "Доступные команды:\n"
-        "/punish &lt;ник&gt; — Проверить статус бана игрока на форуме",
+        "👋 <b>VISE RUSSIA | MOSCOW</b>\n\n"
+        "Бот-помощник форума. Выберите нужный раздел в меню ниже.\n\n"
+        "Команды:\n"
+        "/profile Ник — информация об игроке\n"
+        "/punish Ник — проверка статуса наказания",
         parse_mode="HTML",
+        reply_markup=build_main_keyboard(forum_url),
+    )
+
+
+async def cmd_menu_callback(callback: CallbackQuery) -> None:
+    """Handle menu shortcuts and clearly label features not released yet."""
+    data = callback.data or ""
+    messages = {
+        "profile_help": "Чтобы открыть профиль, отправьте команду:\n/profile Ник",
+        "punish_help": "Чтобы проверить статус наказания, отправьте команду:\n/punish Ник",
+        "stats_soon": "📊 Раздел статистики готовится к запуску.",
+        "support_soon": "🎫 Система поддержки готовится к запуску.",
+    }
+    await callback.answer()
+    if callback.message and data in messages:
+        await callback.message.answer(messages[data])
+
+
+async def lookup_profile_for_message(message: Message) -> tuple[int, dict, str] | None:
+    """Fetch a XenForo profile for a command argument."""
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip():
+        return None
+
+    api_key = os.getenv("XF_API_KEY", "").strip()
+    if not api_key:
+        LOGGER.error("XF_API_KEY is not configured")
+        await message.answer("⚠️ Сервис временно недоступен: не настроен API форума.")
+        return None
+
+    try:
+        forum_url = get_forum_url()
+        username = args[1].strip()
+        async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
+            user_id, profile = await find_forum_user(
+                session, forum_url, username, api_key
+            )
+        if user_id is None or profile is None:
+            await message.answer("❌ Пользователь на форуме не найден.")
+            return None
+        return user_id, profile, forum_url
+    except ValueError:
+        LOGGER.exception("XF_URL or XenForo response is invalid")
+        await message.answer("⚠️ Не удалось получить данные форума. Проверьте настройки.")
+    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        LOGGER.warning("XenForo API request failed: %s", type(exc).__name__)
+        await message.answer("⚠️ Не удалось получить данные форума. Попробуйте позже.")
+    except Exception:
+        LOGGER.exception("Unexpected error while looking up a forum profile")
+        await message.answer("⚠️ Произошла внутренняя ошибка. Попробуйте позже.")
+    return None
+
+
+async def cmd_profile(message: Message) -> None:
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip():
+        await message.answer("Укажите ник игрока: /profile Ник")
+        return
+
+    result = await lookup_profile_for_message(message)
+    if result is None:
+        return
+    user_id, profile, forum_url = result
+    await message.answer(
+        build_profile_message(args[1].strip(), user_id, profile, forum_url),
+        parse_mode="HTML",
+        disable_web_page_preview=True,
     )
 
 
@@ -173,54 +322,33 @@ async def cmd_punish(message: Message) -> None:
         )
         return
 
-    api_key = os.getenv("XF_API_KEY", "").strip()
-    if not api_key:
-        LOGGER.error("XF_API_KEY is not configured")
-        await message.answer("⚠️ Сервис временно недоступен: не настроен API форума.")
+    result = await lookup_profile_for_message(message)
+    if result is None:
         return
-
-    try:
-        forum_url = get_forum_url()
-    except ValueError:
-        LOGGER.exception("XF_URL configuration is invalid")
-        await message.answer("⚠️ Сервис временно недоступен: неверно настроен адрес форума.")
-        return
-
-    username = args[1].strip()
-    try:
-        async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
-            user_id, profile = await find_forum_user(
-                session, forum_url, username, api_key
-            )
-
-        if user_id is None or profile is None:
-            await message.answer("❌ Пользователь на форуме не найден.")
-            return
-
-        response_text = build_player_message(
-            username=username,
-            user_id=user_id,
-            is_banned=bool(profile.get("is_banned", False)),
-            forum_url=forum_url,
-        )
-        await message.answer(
-            response_text,
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-        )
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
-        LOGGER.warning("XenForo API request failed: %s", type(exc).__name__)
-        await message.answer("⚠️ Не удалось получить данные форума. Попробуйте позже.")
-    except Exception:
-        LOGGER.exception("Unexpected error while processing /punish")
-        await message.answer("⚠️ Произошла внутренняя ошибка. Попробуйте позже.")
+    user_id, profile, forum_url = result
+    response_text = build_player_message(
+        username=str(profile.get("username") or args[1].strip()),
+        user_id=user_id,
+        is_banned=bool(profile.get("is_banned", False)),
+        forum_url=forum_url,
+    )
+    await message.answer(
+        response_text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
 
 
 def create_dispatcher() -> Dispatcher:
     """Configure and return the Telegram dispatcher."""
     dispatcher = Dispatcher()
     dispatcher.message.register(cmd_start, Command("start"))
+    dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
+    dispatcher.callback_query.register(
+        cmd_menu_callback,
+        F.data.in_({"profile_help", "punish_help", "stats_soon", "support_soon"}),
+    )
     return dispatcher
 
 
@@ -241,7 +369,6 @@ async def main() -> None:
     runner: web.AppRunner | None = None
 
     try:
-        # Start the HTTP listener before polling so bind errors fail startup clearly.
         runner = await start_web_server(port)
         await bot.delete_webhook(drop_pending_updates=True)
         await dispatcher.start_polling(bot)
