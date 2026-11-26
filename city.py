@@ -61,7 +61,7 @@ def format_events(now: datetime | None = None) -> str:
         starts = current + timedelta(hours=offset_hours)
         lines.append(
             f"🎉 <b>{escape(title)}</b>\n{escape(description)}\n"
-            f"🕒 Начало: <b>{starts.strftime('%d.%m.%Y %H:%M UTC')}</b>"
+            f"🕒 Начало: <b>{starts.strftime('%d.%m.%Y %H:%M UTC')}</b>\\nКод записи: <code>{code}</code>"
         )
     lines.append("\nВремя указано по UTC. Это игровые события, не реальные мероприятия.")
     return "\n\n".join(lines)
