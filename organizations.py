@@ -32,7 +32,7 @@ def format_factions(factions: list, current) -> str:
             f"🏢 <b>{escape(item['name'])}</b>\n"
             f"{escape(item['description'])}\n"
             f"👥 Участников: <b>{item['members']}</b>\n"
-            f"👑 Лидер ID: <code>{item['leader_id'] or 'не назначен'}</code>"
+            f"👑 Лидер ID: <code>{item.get('leader_id') or 'не назначен'}</code>"
         )
     if current:
         lines.extend([
