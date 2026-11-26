@@ -209,6 +209,25 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS game_education_institution_idx
                     ON game_education_students (institution_id, enrolled_at);
+                CREATE TABLE IF NOT EXISTS game_education_groups (
+                    id BIGSERIAL PRIMARY KEY,
+                    institution_id BIGINT NOT NULL REFERENCES game_education_institutions(id) ON DELETE CASCADE,
+                    group_code TEXT NOT NULL,
+                    group_name TEXT NOT NULL,
+                    UNIQUE (institution_id, group_code)
+                );
+                ALTER TABLE game_education_students
+                    ADD COLUMN IF NOT EXISTS group_id BIGINT
+                    REFERENCES game_education_groups(id) ON DELETE SET NULL;
+                INSERT INTO game_education_groups (institution_id, group_code, group_name)
+                SELECT i.id, g.group_code, g.group_name
+                FROM game_education_institutions i
+                CROSS JOIN (VALUES
+                    ('A-01', 'Учебная группа А-01'),
+                    ('B-01', 'Учебная группа Б-01'),
+                    ('C-01', 'Учебная группа В-01')
+                ) AS g(group_code, group_name)
+                ON CONFLICT (institution_id, group_code) DO NOTHING;
                 CREATE TABLE IF NOT EXISTS game_education_courses (
                     id BIGSERIAL PRIMARY KEY,
                     faction_id BIGINT NOT NULL REFERENCES game_factions(id) ON DELETE CASCADE,
@@ -1878,9 +1897,14 @@ class Database:
                 )
                 if current:
                     return False, "Ты уже зачислен в учебное заведение. Сначала используй /edu leave."
+                group_id = await connection.fetchval(
+                    """SELECT id FROM game_education_groups
+                       WHERE institution_id = $1 ORDER BY id LIMIT 1""", institution_id
+                )
                 await connection.execute(
-                    """INSERT INTO game_education_students (user_id, faction_id, institution_id)
-                       VALUES ($1, $2, $3)""", user_id, institution["faction_id"], institution_id
+                    """INSERT INTO game_education_students (user_id, faction_id, institution_id, group_id)
+                       VALUES ($1, $2, $3, $4)""",
+                    user_id, institution["faction_id"], institution_id, group_id
                 )
                 return True, f"Ты зачислен: «{institution['name']}»."
 
@@ -1893,11 +1917,23 @@ class Database:
     async def get_education_profile(self, user_id: int) -> asyncpg.Record | None:
         return await self._require_pool().fetchrow(
             """SELECT s.user_id, s.enrolled_at, i.name AS institution_name,
-                      i.institution_type, i.district, p.username
+                      i.institution_type, i.district, p.username, g.group_name, g.group_code
                FROM game_education_students s
                JOIN game_education_institutions i ON i.id = s.institution_id
+               LEFT JOIN game_education_groups g ON g.id = s.group_id
                JOIN game_players p ON p.user_id = s.user_id
                WHERE s.user_id = $1""", user_id
+        )
+
+    async def list_education_groups(self, institution_id: int | None = None) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT g.id, g.group_code, g.group_name, i.name AS institution_name,
+                      COUNT(s.user_id)::int AS students
+               FROM game_education_groups g
+               JOIN game_education_institutions i ON i.id = g.institution_id
+               LEFT JOIN game_education_students s ON s.group_id = g.id
+               WHERE ($1::BIGINT IS NULL OR g.institution_id = $1)
+               GROUP BY g.id, i.name ORDER BY i.id, g.id""", institution_id
         )
 
     async def list_education_courses(self, user_id: int) -> list[asyncpg.Record]:
@@ -1976,10 +2012,12 @@ class Database:
             if institution is None:
                 return None, []
             students = await connection.fetch(
-                """SELECT s.user_id, p.username, i.name AS institution_name, s.enrolled_at
+                """SELECT s.user_id, p.username, i.name AS institution_name,
+                          g.group_code, g.group_name, s.enrolled_at
                    FROM game_education_students s
                    JOIN game_players p ON p.user_id = s.user_id
                    JOIN game_education_institutions i ON i.id = s.institution_id
+                   LEFT JOIN game_education_groups g ON g.id = s.group_id
                    WHERE s.institution_id = $1
                    ORDER BY s.enrolled_at LIMIT 100""", institution["id"]
             )
