@@ -271,10 +271,30 @@ def build_stats_message(stats: dict, forum_url: str) -> str:
 
 
 async def fetch_forum_stats(session: aiohttp.ClientSession, forum_url: str, api_key: str) -> dict:
-    """Retrieve aggregate site statistics from XenForo's documented /stats/ API."""
+    """Retrieve site statistics and log safe metadata if a firewall intercepts the API."""
     headers = {"XF-Api-Key": api_key, "Accept": "application/json"}
-    async with session.get(urljoin(forum_url, "api/stats/"), headers=headers) as response:
+    request_url = urljoin(forum_url, "api/stats/")
+    async with session.get(request_url, headers=headers, allow_redirects=True) as response:
+        final_url = urlsplit(str(response.url))
+        content_type = response.headers.get("Content-Type", "")
+        location = response.headers.get("Location", "")
+        location_url = urlsplit(location) if location else None
+        LOGGER.info(
+            "XenForo stats HTTP response: status=%s content_type=%r final_host=%r "
+            "final_path=%r server=%r cf_ray_present=%s redirect_host=%r",
+            response.status,
+            content_type[:120],
+            final_url.hostname,
+            final_url.path[:180],
+            response.headers.get("Server", "")[:80],
+            bool(response.headers.get("CF-Ray")),
+            location_url.hostname if location_url else None,
+        )
         response.raise_for_status()
+        if "json" not in content_type.lower():
+            raise ValueError(
+                f"XenForo stats endpoint returned non-JSON content type: {content_type[:120]!r}"
+            )
         payload = await response.json()
     if not isinstance(payload, dict):
         raise ValueError("Unexpected XenForo statistics response")
@@ -293,7 +313,7 @@ async def send_forum_stats(message: Message) -> None:
             stats = await fetch_forum_stats(session, forum_url, api_key)
         await message.answer(build_stats_message(stats, forum_url), parse_mode="HTML", disable_web_page_preview=True)
     except (ValueError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
-        LOGGER.warning("XenForo statistics request failed: %s", type(exc).__name__)
+        LOGGER.warning("XenForo statistics request failed: %s: %s", type(exc).__name__, str(exc)[:200])
         await message.answer("⚠️ Не удалось получить статистику форума. Попробуйте позже.")
     except Exception:
         LOGGER.exception("Unexpected error while fetching forum statistics")
