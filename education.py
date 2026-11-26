@@ -20,6 +20,19 @@ def format_education_institutions(institutions: list) -> str:
     return "\n".join(lines)
 
 
+def format_education_groups(groups: list) -> str:
+    lines = ["👥 <b>Учебные группы</b>"]
+    for group in groups:
+        lines.append(
+            f"\n<b>{escape(group['institution_name'])}</b>\n"
+            f"{escape(group['group_code'])} — {escape(group['group_name'])}\n"
+            f"Учащихся: {group['students']}"
+        )
+    if not groups:
+        lines.append("Учебные группы не найдены.")
+    return "\n".join(lines)
+
+
 def format_education_profile(profile) -> str:
     if profile is None:
         return (
@@ -79,6 +92,20 @@ async def manage_education(message: Message, command: CommandObject) -> None:
         await message.answer(format_education_institutions(institutions), parse_mode="HTML")
         return
 
+    if action == "groups" and len(parts) in (1, 2):
+        institution_id = None
+        if len(parts) == 2:
+            try:
+                institution_id = int(parts[1])
+                if institution_id <= 0:
+                    raise ValueError
+            except ValueError:
+                await message.answer("Формат: /edu groups [ID_УЧЕБНОГО_ЗАВЕДЕНИЯ]")
+                return
+        groups = await database.list_education_groups(institution_id)
+        await message.answer(format_education_groups(groups), parse_mode="HTML")
+        return
+
     if action == "enroll" and len(parts) == 2:
         try:
             institution_id = int(parts[1])
@@ -123,6 +150,6 @@ async def manage_education(message: Message, command: CommandObject) -> None:
         return
 
     await message.answer(
-        "Команды: /edu, /edu institutions, /edu enroll ID, /edu leave, "
+        "Команды: /edu, /edu institutions, /edu groups [ID], /edu enroll ID, /edu leave, "
         "/edu classes, /edu attend CODE, /edu exam CODE, /edu roster"
     )
