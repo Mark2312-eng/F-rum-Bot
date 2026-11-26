@@ -277,11 +277,12 @@ async def webapp_api(request: web.Request) -> web.Response:
             return web.json_response({"items": rows(await database.get_game_inventory(user_id))})
         if action == "property":
             owned = await database.get_game_property(user_id)
-            return web.json_response({"owned": dict(owned) if owned else None, "items": rows(await database.get_game_property_catalog())})
+            return web.json_response({"owned": ({"id": owned["id"], "property_type": owned["property_type"], "name": owned["name"]} if owned else None), "items": rows(await database.get_game_property_catalog())})
         if action == "garage":
-            return web.json_response({"owned": rows(await database.get_game_vehicles(user_id)), "items": rows(await database.get_game_vehicle_catalog())})
+            return web.json_response({"owned": [{"id": v["id"], "name": v["name"], "description": v["description"]} for v in await database.get_game_vehicles(user_id)], "items": rows(await database.get_game_vehicle_catalog())})
         if action == "factions":
-            return web.json_response({"items": rows(await database.get_game_factions()), "current": dict(await database.get_game_faction(user_id)) if await database.get_game_faction(user_id) else None})
+            current = await database.get_game_faction(user_id)
+            return web.json_response({"items": rows(await database.get_game_factions()), "current": dict(current) if current else None})
         if action == "family":
             family = await database.get_game_family(user_id)
             return web.json_response({"family": dict(family) if family else None})
