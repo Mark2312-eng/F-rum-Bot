@@ -192,6 +192,8 @@ def build_owner_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🆔 Мой Telegram ID", callback_data="owner:myid")],
         [InlineKeyboardButton(text="⚙️ Настройки группы", callback_data="owner:settings"), InlineKeyboardButton(text="📜 Журнал модерации", callback_data="owner:modlog")],
         [InlineKeyboardButton(text="➕ Подключить эту группу", callback_data="owner:connect")],
+        [InlineKeyboardButton(text="⚠️ Предупредить", callback_data="owner:warn"), InlineKeyboardButton(text="🔇 Мут 10 мин", callback_data="owner:mute")],
+        [InlineKeyboardButton(text="🔊 Снять мут", callback_data="owner:unmute")],
         [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
     ])
 
@@ -402,6 +404,13 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
             await message.answer(owner_summary(owner_id, count), parse_mode="HTML", reply_markup=build_owner_keyboard())
             return
         action = data.split(":", 1)[1]
+        if action in {"warn", "mute", "unmute"}:
+            if message.chat.type == "private":
+                await message.answer("Откройте меню владельца прямо в подключённой группе, затем выберите действие модерации.", reply_markup=build_owner_keyboard())
+            else:
+                PENDING_INPUTS[callback.from_user.id] = f"mod_{action}"
+                await message.answer("Отправьте Telegram ID участника. Бот проверит права и выполнит действие.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✖️ Отмена", callback_data="input:cancel")]]))
+            return
         if action in {"summary", "chats"}:
             count = await database.registered_chat_count()
             body = owner_summary(owner_id, count) if action == "summary" else f"👥 Подключено групп: <b>{count}</b>"
@@ -644,6 +653,10 @@ async def button_input_handler(message: Message) -> None:
         "edu": manage_education, "bus": manage_transport,
         "taxi": manage_taxi, "event": manage_city_event,
     }
+    if action in {"mod_warn", "mod_mute", "mod_unmute"}:
+        moderation_handlers = {"mod_warn": group_warn_handler, "mod_mute": group_mute_handler, "mod_unmute": group_unmute_handler}
+        await moderation_handlers[action](message, message.bot)
+        return
     handler = handlers.get(action)
     if handler:
         await handler(message, SimpleNamespace(command=action, args=message.text.strip(), prefix="/", mention=None))
