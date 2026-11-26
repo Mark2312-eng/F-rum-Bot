@@ -12,6 +12,8 @@ from database import database
 URL_RE = re.compile(r"(?:https?://|www\.|t\.me/|telegram\.me/)", re.IGNORECASE)
 FLOOD_WINDOW_SECONDS = 8
 FLOOD_MAX_MESSAGES = 6
+FLOOD_LIMITS = {"off": None, "balanced": 6, "strict": 4}
+LINK_POLICIES = {"allow", "block", "mute"}
 WARNING_LIMIT = 3
 
 _message_times: dict[tuple[int, int], deque[float]] = defaultdict(deque)
@@ -74,16 +76,36 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
     if await is_chat_admin(bot, message.chat.id, message.from_user.id):
         return
 
+    settings = await database.get_chat_settings(message.chat.id)
     if contains_link(message):
+        policy = settings["link_policy"]
+        if policy == "allow":
+            return
         try:
             await message.delete()
-            await message.answer(
-                f"⚠️ {message.from_user.mention_html()}, ссылки в этой группе разрешены только администраторам.",
-                parse_mode="HTML",
-            )
+            if policy == "mute":
+                await bot.restrict_chat_member(
+                    message.chat.id,
+                    message.from_user.id,
+                    permissions=ChatPermissions(can_send_messages=False),
+                    until_date=int(time.time()) + 300,
+                )
+                await message.answer(
+                    f"🔇 {message.from_user.mention_html()}, отправка ссылок запрещена. Ограничение на 5 минут.",
+                    parse_mode="HTML",
+                )
+            else:
+                await message.answer(
+                    f"⚠️ {message.from_user.mention_html()}, ссылки в этой группе разрешены только администраторам.",
+                    parse_mode="HTML",
+                )
         except Exception:
-            # Missing delete permissions should not crash polling.
+            # Missing delete/restrict permissions should not crash polling.
             return
+        return
+
+    flood_limit = FLOOD_LIMITS.get(settings["moderation_mode"], FLOOD_MAX_MESSAGES)
+    if flood_limit is None:
         return
 
     key = (message.chat.id, message.from_user.id)
@@ -92,7 +114,7 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
     while history and now - history[0] > FLOOD_WINDOW_SECONDS:
         history.popleft()
     history.append(now)
-    if len(history) > FLOOD_MAX_MESSAGES:
+    if len(history) > flood_limit:
         try:
             await message.delete()
             await message.answer(
