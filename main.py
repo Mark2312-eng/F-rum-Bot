@@ -143,7 +143,7 @@ def build_main_keyboard(forum_url: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="🛡️ Проверка наказания", callback_data="punish_help"),
             ],
             [
-                InlineKeyboardButton(text="📊 Статистика", callback_data="stats_soon"),
+                InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
                 InlineKeyboardButton(text="🎫 Поддержка", callback_data="support_soon"),
             ],
             [InlineKeyboardButton(text="🌐 Открыть форум", url=forum_url)],
@@ -228,6 +228,78 @@ async def find_forum_user(
     return user_id, profile
 
 
+def build_stats_message(stats: dict, forum_url: str) -> str:
+    """Format the official XenForo site statistics response."""
+    totals = stats.get("totals")
+    totals = totals if isinstance(totals, dict) else stats
+    online = stats.get("online")
+    online = online if isinstance(online, dict) else {}
+
+    def number(value: object) -> str | None:
+        if isinstance(value, bool):
+            return None
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return f"{parsed:,}".replace(",", " ")
+
+    labels = (("threads", "🧵 Тем"), ("messages", "💬 Сообщений"), ("users", "👥 Пользователей"))
+    lines = ["📊 <b>Статистика форума VISE RUSSIA</b>", ""]
+    for key, label in labels:
+        value = number(totals.get(key))
+        if value is not None:
+            lines.append(f"{label}: <b>{value}</b>")
+
+    online_total = number(online.get("total"))
+    if online_total is not None:
+        lines.extend(["", f"🟢 Сейчас онлайн: <b>{online_total}</b>"])
+        members = number(online.get("members"))
+        guests = number(online.get("guests"))
+        if members is not None:
+            lines.append(f"   • Участников: {members}")
+        if guests is not None:
+            lines.append(f"   • Гостей: {guests}")
+
+    latest_user = stats.get("latest_user")
+    if len(lines) == 2 and not (isinstance(latest_user, dict) and latest_user.get("username")):
+        return "⚠️ Форум не вернул доступные статистические данные."
+    if isinstance(latest_user, dict) and latest_user.get("username"):
+        lines.extend(["", f"🆕 Последний участник: <b>{escape(str(latest_user['username']))}</b>"])
+    lines.extend(["", f'<a href="{escape(forum_url, quote=True)}">Открыть форум</a>'])
+    return "\n".join(lines)
+
+
+async def fetch_forum_stats(session: aiohttp.ClientSession, forum_url: str, api_key: str) -> dict:
+    """Retrieve aggregate site statistics from XenForo's documented /stats/ API."""
+    headers = {"XF-Api-Key": api_key, "Accept": "application/json"}
+    async with session.get(urljoin(forum_url, "api/stats/"), headers=headers) as response:
+        response.raise_for_status()
+        payload = await response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("Unexpected XenForo statistics response")
+    return payload
+
+
+async def send_forum_stats(message: Message) -> None:
+    api_key = os.getenv("XF_API_KEY", "").strip()
+    if not api_key:
+        LOGGER.error("XF_API_KEY is not configured")
+        await message.answer("⚠️ Статистика временно недоступна: не настроен API форума.")
+        return
+    try:
+        forum_url = get_forum_url()
+        async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
+            stats = await fetch_forum_stats(session, forum_url, api_key)
+        await message.answer(build_stats_message(stats, forum_url), parse_mode="HTML", disable_web_page_preview=True)
+    except (ValueError, aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        LOGGER.warning("XenForo statistics request failed: %s", type(exc).__name__)
+        await message.answer("⚠️ Не удалось получить статистику форума. Попробуйте позже.")
+    except Exception:
+        LOGGER.exception("Unexpected error while fetching forum statistics")
+        await message.answer("⚠️ Не удалось получить статистику форума. Попробуйте позже.")
+
+
 async def cmd_start(message: Message) -> None:
     try:
         forum_url = get_forum_url()
@@ -253,11 +325,12 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
     messages = {
         "profile_help": "Чтобы открыть профиль, отправьте команду:\n/profile Ник",
         "punish_help": "Чтобы проверить статус наказания, отправьте команду:\n/punish Ник",
-        "stats_soon": "📊 Раздел статистики готовится к запуску.",
         "support_soon": "🎫 Система поддержки готовится к запуску.",
     }
     await callback.answer()
-    if callback.message and data in messages:
+    if callback.message and data == "stats":
+        await send_forum_stats(callback.message)
+    elif callback.message and data in messages:
         await callback.message.answer(messages[data])
 
 
@@ -347,7 +420,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(cmd_punish, Command("punish"))
     dispatcher.callback_query.register(
         cmd_menu_callback,
-        F.data.in_({"profile_help", "punish_help", "stats_soon", "support_soon"}),
+        F.data.in_({"profile_help", "punish_help", "stats", "support_soon"}),
     )
     return dispatcher
 
