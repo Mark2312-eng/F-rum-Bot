@@ -91,6 +91,12 @@ class Database:
                     rank_name TEXT NOT NULL DEFAULT 'Новичок', joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     PRIMARY KEY (faction_id, user_id), UNIQUE (user_id)
                 );
+                INSERT INTO game_factions (name, description)
+                VALUES
+                    ('Правительство Москвы', 'Городские службы и управление городом.'),
+                    ('Армия России', 'Военная организация игрового мира.'),
+                    ('ФСБ', 'Государственная служба безопасности игрового мира.')
+                ON CONFLICT (name) DO NOTHING;
                 CREATE TABLE IF NOT EXISTS game_inventory (
                     user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
                     item_code TEXT NOT NULL, quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
@@ -419,6 +425,147 @@ class Database:
             "DELETE FROM game_employment WHERE user_id = $1", user_id
         )
         return result.endswith("1")
+
+
+    async def get_game_factions(self) -> list[asyncpg.Record]:
+        return await self._require_pool().fetch(
+            """SELECT f.id, f.name, f.description, COUNT(m.user_id)::int AS members
+               FROM game_factions f LEFT JOIN game_faction_members m ON m.faction_id = f.id
+               GROUP BY f.id ORDER BY f.id"""
+        )
+
+    async def get_game_faction(self, user_id: int) -> asyncpg.Record | None:
+        return await self._require_pool().fetchrow(
+            """SELECT f.id, f.name, f.description, m.rank_name, m.joined_at
+               FROM game_faction_members m JOIN game_factions f ON f.id = m.faction_id
+               WHERE m.user_id = $1""",
+            user_id,
+        )
+
+    async def join_game_faction(self, user_id: int, username: str, faction_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                    user_id, username[:64],
+                )
+                current = await connection.fetchval(
+                    "SELECT faction_id FROM game_faction_members WHERE user_id = $1 FOR UPDATE",
+                    user_id,
+                )
+                if current is not None:
+                    return False, "Ты уже состоишь во фракции. Сначала выйди из неё."
+                faction = await connection.fetchrow(
+                    "SELECT id, name FROM game_factions WHERE id = $1", faction_id
+                )
+                if faction is None:
+                    return False, "Фракция не найдена."
+                await connection.execute(
+                    "INSERT INTO game_faction_members (faction_id, user_id) VALUES ($1, $2)",
+                    faction_id, user_id,
+                )
+                return True, f"Ты вступил во фракцию «{faction['name']}»."
+
+    async def leave_game_faction(self, user_id: int) -> bool:
+        result = await self._require_pool().execute(
+            "DELETE FROM game_faction_members WHERE user_id = $1", user_id
+        )
+        return result.endswith("1")
+
+    async def create_game_family(self, user_id: int, username: str, name: str) -> tuple[bool, str]:
+        clean_name = " ".join(name.split()).strip()
+        if not 3 <= len(clean_name) <= 32:
+            return False, "Название семьи должно содержать от 3 до 32 символов."
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username""",
+                    user_id, username[:64],
+                )
+                existing = await connection.fetchval(
+                    "SELECT family_id FROM game_family_members WHERE user_id = $1 FOR UPDATE",
+                    user_id,
+                )
+                if existing is not None:
+                    return False, "Ты уже состоишь в семье. Сначала выйди из неё."
+                family_id = await connection.fetchval(
+                    """INSERT INTO game_families (name, owner_id) VALUES ($1, $2)
+                       ON CONFLICT (name) DO NOTHING RETURNING id""",
+                    clean_name, user_id,
+                )
+                if family_id is None:
+                    return False, "Семья с таким названием уже существует."
+                await connection.execute(
+                    """INSERT INTO game_family_members (family_id, user_id, role)
+                       VALUES ($1, $2, 'owner')""",
+                    family_id, user_id,
+                )
+                return True, f"Семья «{clean_name}» создана. Её ID: {family_id}."
+
+    async def join_game_family(self, user_id: int, family_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    "INSERT INTO game_players (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING",
+                    user_id,
+                )
+                existing = await connection.fetchval(
+                    "SELECT family_id FROM game_family_members WHERE user_id = $1 FOR UPDATE",
+                    user_id,
+                )
+                if existing is not None:
+                    return False, "Ты уже состоишь в семье. Сначала выйди из неё."
+                family = await connection.fetchrow(
+                    "SELECT id, name FROM game_families WHERE id = $1 FOR UPDATE",
+                    family_id,
+                )
+                if family is None:
+                    return False, "Семья не найдена."
+                member_count = await connection.fetchval(
+                    "SELECT COUNT(*) FROM game_family_members WHERE family_id = $1",
+                    family_id,
+                )
+                if member_count >= 10:
+                    return False, "В семье уже максимальное количество участников (10)."
+                await connection.execute(
+                    """INSERT INTO game_family_members (family_id, user_id)
+                       VALUES ($1, $2)""",
+                    family_id, user_id,
+                )
+                return True, f"Ты вступил в семью «{family['name']}»."
+
+    async def leave_game_family(self, user_id: int) -> tuple[bool, str]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                membership = await connection.fetchrow(
+                    """SELECT m.family_id, m.role, f.name
+                       FROM game_family_members m JOIN game_families f ON f.id = m.family_id
+                       WHERE m.user_id = $1 FOR UPDATE OF m""",
+                    user_id,
+                )
+                if membership is None:
+                    return False, "Ты не состоишь в семье."
+                if membership["role"] == "owner":
+                    return False, "Глава не может покинуть семью. Передай главенство или распусти семью через поддержку."
+                await connection.execute(
+                    "DELETE FROM game_family_members WHERE user_id = $1", user_id
+                )
+                return True, f"Ты покинул семью «{membership['name']}»."
+
+    async def get_game_family(self, user_id: int) -> asyncpg.Record | None:
+        return await self._require_pool().fetchrow(
+            """SELECT f.id, f.name, f.owner_id, m.role,
+                      (SELECT COUNT(*)::int FROM game_family_members x WHERE x.family_id = f.id) AS members
+               FROM game_family_members m JOIN game_families f ON f.id = m.family_id
+               WHERE m.user_id = $1""",
+            user_id,
+        )
 
 
 

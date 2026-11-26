@@ -19,6 +19,7 @@ from moderation import moderate_message, mute_member, owner_summary, register_gr
 from group_settings import apply_setting_callback, show_group_settings
 from game import claim_daily_reward, handle_game_callback, show_achievements, show_game_profile, show_leaderboard
 from work import handle_work_callback, show_jobs, show_work
+from organizations import handle_org_callback, manage_family, show_factions
 
 load_dotenv()
 
@@ -516,6 +517,8 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(show_achievements, Command("achievements"))
     dispatcher.message.register(show_jobs, Command("jobs"))
     dispatcher.message.register(show_work, Command("work"))
+    dispatcher.message.register(show_factions, Command("factions"))
+    dispatcher.message.register(manage_family, Command("family"))
     dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
     dispatcher.message.register(cmd_owner, Command("owner"))
@@ -531,6 +534,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
     dispatcher.callback_query.register(handle_game_callback, F.data.startswith("game:"))
     dispatcher.callback_query.register(handle_work_callback, F.data.startswith("work:"))
+    dispatcher.callback_query.register(handle_org_callback, F.data.startswith("org:"))
     dispatcher.callback_query.register(group_setting_callback, F.data.startswith("cfg:"))
     return dispatcher
 
