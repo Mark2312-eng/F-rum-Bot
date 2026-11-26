@@ -23,6 +23,7 @@ from organizations import handle_org_callback, manage_family, show_factions
 from economy import handle_economy_callback, show_garage, show_inventory, show_properties, show_shop
 from city import handle_phone_callback, show_city, show_events, show_phone, show_places
 from quests import handle_quest_callback, show_quests, show_reputation
+from tournaments import manage_tournament, show_tournaments
 
 load_dotenv()
 
@@ -532,6 +533,8 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(show_events, Command("events"))
     dispatcher.message.register(show_quests, Command("quests"))
     dispatcher.message.register(show_reputation, Command("reputation"))
+    dispatcher.message.register(show_tournaments, Command("tournaments"))
+    dispatcher.message.register(manage_tournament, Command("tournament"))
     dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
     dispatcher.message.register(cmd_owner, Command("owner"))
