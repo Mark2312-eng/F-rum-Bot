@@ -51,6 +51,83 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS moderation_events_chat_created_idx
                     ON moderation_events (chat_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS game_players (
+                    user_id BIGINT PRIMARY KEY,
+                    username TEXT NOT NULL DEFAULT '',
+                    xp BIGINT NOT NULL DEFAULT 0 CHECK (xp >= 0),
+                    coins BIGINT NOT NULL DEFAULT 0 CHECK (coins >= 0),
+                    reputation INTEGER NOT NULL DEFAULT 0,
+                    daily_streak INTEGER NOT NULL DEFAULT 0 CHECK (daily_streak >= 0),
+                    last_daily_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS game_players_xp_idx ON game_players (xp DESC, user_id ASC);
+                CREATE TABLE IF NOT EXISTS game_achievements (
+                    user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    achievement_code TEXT NOT NULL,
+                    unlocked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (user_id, achievement_code)
+                );
+                CREATE TABLE IF NOT EXISTS game_families (
+                    id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+                    owner_id BIGINT NOT NULL REFERENCES game_players(user_id),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS game_family_members (
+                    family_id BIGINT NOT NULL REFERENCES game_families(id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    role TEXT NOT NULL DEFAULT 'member', joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (family_id, user_id), UNIQUE (user_id)
+                );
+                CREATE TABLE IF NOT EXISTS game_factions (
+                    id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+                    description TEXT NOT NULL DEFAULT ''
+                );
+                CREATE TABLE IF NOT EXISTS game_faction_members (
+                    faction_id BIGINT NOT NULL REFERENCES game_factions(id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    rank_name TEXT NOT NULL DEFAULT 'Новичок', joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (faction_id, user_id), UNIQUE (user_id)
+                );
+                CREATE TABLE IF NOT EXISTS game_inventory (
+                    user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    item_code TEXT NOT NULL, quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+                    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    PRIMARY KEY (user_id, item_code)
+                );
+                CREATE TABLE IF NOT EXISTS game_properties (
+                    id BIGSERIAL PRIMARY KEY,
+                    owner_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    property_type TEXT NOT NULL, name TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS game_jobs (
+                    id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+                    description TEXT NOT NULL DEFAULT '', starting_rank TEXT NOT NULL DEFAULT 'Стажёр',
+                    reward_coins INTEGER NOT NULL DEFAULT 0 CHECK (reward_coins >= 0),
+                    active BOOLEAN NOT NULL DEFAULT TRUE
+                );
+                CREATE TABLE IF NOT EXISTS game_employment (
+                    user_id BIGINT PRIMARY KEY REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    job_id BIGINT NOT NULL REFERENCES game_jobs(id),
+                    rank_name TEXT NOT NULL DEFAULT 'Стажёр',
+                    shifts_completed INTEGER NOT NULL DEFAULT 0 CHECK (shifts_completed >= 0),
+                    hired_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS game_events (
+                    id BIGSERIAL PRIMARY KEY, title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+                    starts_at TIMESTAMPTZ NOT NULL, ends_at TIMESTAMPTZ,
+                    reward_coins INTEGER NOT NULL DEFAULT 0 CHECK (reward_coins >= 0),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS game_quest_progress (
+                    user_id BIGINT NOT NULL REFERENCES game_players(user_id) ON DELETE CASCADE,
+                    quest_code TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0 CHECK (progress >= 0),
+                    completed_at TIMESTAMPTZ, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (user_id, quest_code)
+                );
             """)
 
     async def close(self) -> None:
@@ -153,6 +230,85 @@ class Database:
                SET warning_count = 0, updated_at = NOW()""",
             chat_id, user_id,
         )
+
+
+    async def get_game_profile(self, user_id: int, username: str = "") -> asyncpg.Record:
+        pool = self._require_pool()
+        return await pool.fetchrow(
+            """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+               ON CONFLICT (user_id) DO UPDATE
+               SET username = CASE WHEN EXCLUDED.username <> '' THEN EXCLUDED.username
+                                   ELSE game_players.username END,
+                   updated_at = NOW()
+               RETURNING user_id, username, xp, coins, reputation, daily_streak,
+                         last_daily_at, created_at""",
+            user_id, username[:64],
+        )
+
+    async def claim_game_daily(self, user_id: int, username: str = "") -> tuple[asyncpg.Record, int, bool]:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO game_players (user_id, username) VALUES ($1, $2)
+                       ON CONFLICT (user_id) DO UPDATE
+                       SET username = CASE WHEN EXCLUDED.username <> '' THEN EXCLUDED.username
+                                           ELSE game_players.username END,
+                           updated_at = NOW()""",
+                    user_id, username[:64],
+                )
+                player = await connection.fetchrow(
+                    """SELECT user_id, username, xp, coins, reputation, daily_streak, last_daily_at
+                       FROM game_players WHERE user_id = $1 FOR UPDATE""",
+                    user_id,
+                )
+                today = await connection.fetchval("SELECT CURRENT_DATE")
+                yesterday = await connection.fetchval("SELECT CURRENT_DATE - 1")
+                last_day = player["last_daily_at"].date() if player["last_daily_at"] else None
+                if last_day == today:
+                    return player, 0, False
+                streak = player["daily_streak"] + 1 if last_day == yesterday else 1
+                reward = 100 + min(streak - 1, 6) * 25
+                updated = await connection.fetchrow(
+                    """UPDATE game_players
+                       SET xp = xp + 50, coins = coins + $2, daily_streak = $3,
+                           last_daily_at = NOW(), updated_at = NOW()
+                       WHERE user_id = $1
+                       RETURNING user_id, username, xp, coins, reputation, daily_streak, last_daily_at""",
+                    user_id, reward, streak,
+                )
+                return updated, reward, True
+
+    async def get_game_leaderboard(self, limit: int = 10) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        safe_limit = max(1, min(int(limit), 20))
+        return await pool.fetch(
+            """SELECT user_id, username, xp, coins, reputation FROM game_players
+               ORDER BY xp DESC, created_at ASC LIMIT $1""",
+            safe_limit,
+        )
+
+    async def sync_game_achievements(self, user_id: int) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        await pool.execute(
+            """INSERT INTO game_achievements (user_id, achievement_code)
+               SELECT user_id, code FROM game_players
+               CROSS JOIN (VALUES
+                   ('first_steps', xp >= 50),
+                   ('experienced', xp >= 500),
+                   ('wealthy', coins >= 1000),
+                   ('reputation', reputation >= 100)
+               ) AS achievements(code, achieved)
+               WHERE user_id = $1 AND achieved
+               ON CONFLICT (user_id, achievement_code) DO NOTHING""",
+            user_id,
+        )
+        return await pool.fetch(
+            """SELECT achievement_code, unlocked_at FROM game_achievements
+               WHERE user_id = $1 ORDER BY unlocked_at ASC""",
+            user_id,
+        )
+
 
 
 database = Database()

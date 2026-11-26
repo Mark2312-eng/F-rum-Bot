@@ -119,7 +119,7 @@ class ProfileFormattingTests(unittest.TestCase):
         }
         self.assertEqual(
             callbacks,
-            {"owner_panel"},
+            {"owner_panel", "game:profile"},
         )
 
 

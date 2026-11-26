@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from database import database
 from moderation import moderate_message, mute_member, owner_summary, register_group, show_moderation_log, unmute_member, warn_member
 from group_settings import apply_setting_callback, show_group_settings
+from game import claim_daily_reward, handle_game_callback, show_achievements, show_game_profile, show_leaderboard
 
 load_dotenv()
 
@@ -142,6 +143,7 @@ def build_main_keyboard(forum_url: str) -> InlineKeyboardMarkup:
     """Create the main navigation keyboard."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="🎮 Игровой профиль", callback_data="game:profile")],
             [InlineKeyboardButton(text="⚙️ Панель владельца", callback_data="owner_panel")],
             [InlineKeyboardButton(text="🌐 Открыть форум", url=forum_url)],
         ]
@@ -507,6 +509,10 @@ def create_dispatcher() -> Dispatcher:
     """Configure and return the Telegram dispatcher."""
     dispatcher = Dispatcher()
     dispatcher.message.register(cmd_start, Command("start"))
+    dispatcher.message.register(show_game_profile, Command("game"))
+    dispatcher.message.register(claim_daily_reward, Command("daily"))
+    dispatcher.message.register(show_leaderboard, Command("top"))
+    dispatcher.message.register(show_achievements, Command("achievements"))
     dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
     dispatcher.message.register(cmd_owner, Command("owner"))
@@ -520,6 +526,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(group_unmute_handler, Command("unmute", ignore_mention=True))
     dispatcher.message.register(group_moderation_handler)
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
+    dispatcher.callback_query.register(handle_game_callback, F.data.startswith("game:"))
     dispatcher.callback_query.register(group_setting_callback, F.data.startswith("cfg:"))
     return dispatcher
 
