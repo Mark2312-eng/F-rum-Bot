@@ -143,6 +143,7 @@ def build_main_keyboard(forum_url: str) -> InlineKeyboardMarkup:
     """Create the main navigation keyboard."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="🎮 Игровой профиль", callback_data="game:profile")],
             [InlineKeyboardButton(text="⚙️ Панель владельца", callback_data="owner_panel")],
             [InlineKeyboardButton(text="🌐 Открыть форум", url=forum_url)],
         ]
