@@ -60,11 +60,10 @@ def format_family(family, members: list | None = None) -> str:
     ]
     if members is not None:
         lines.extend(["", "<b>Состав семьи</b>"])
-        lines.extend(
-            f"• {escape(str(item['username'] or f'Игрок {item['user_id']}'))} — "
-            f"{'глава' if item['role'] == 'owner' else 'участник'}"
-            for item in members
-        )
+        for item in members:
+            member_name = item["username"] or f"Игрок {item['user_id']}"
+            member_role = "глава" if item["role"] == "owner" else "участник"
+            lines.append(f"• {escape(str(member_name))} — {member_role}")
     return "\n".join(lines)
 
 
