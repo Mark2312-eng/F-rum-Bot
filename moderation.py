@@ -160,7 +160,7 @@ async def mute_member(message: Message, bot: Bot, owner_id: int) -> None:
         await bot.restrict_chat_member(
             message.chat.id,
             target.id,
-            permissions={"can_send_messages": False},
+            permissions=ChatPermissions(can_send_messages=False),
             until_date=int(time.time()) + 600,
         )
         await message.answer(f"🔇 {target.mention_html()} ограничен на 10 минут.", parse_mode="HTML")
