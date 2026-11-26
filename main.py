@@ -158,7 +158,8 @@ def build_main_keyboard(forum_url: str, is_owner: bool = False) -> InlineKeyboar
         [InlineKeyboardButton(text="🎮 Игра", callback_data="menu:game"), InlineKeyboardButton(text="💼 Работа", callback_data="menu:work")],
         [InlineKeyboardButton(text="🏛 Организации", callback_data="menu:organizations"), InlineKeyboardButton(text="💰 Экономика", callback_data="menu:economy")],
         [InlineKeyboardButton(text="🏙 Город", callback_data="menu:city"), InlineKeyboardButton(text="📋 Задания", callback_data="menu:quests")],
-        [InlineKeyboardButton(text="🏆 Турниры", callback_data="menu:tournaments"), InlineKeyboardButton(text="👤 Профиль игрока", callback_data="menu:profile")],
+        [InlineKeyboardButton(text="🏆 Турниры", callback_data="menu:tournaments"), InlineKeyboardButton(text="🏢 Службы города", callback_data="menu:services")],
+        [InlineKeyboardButton(text="👤 Профиль игрока", callback_data="menu:profile")],
         [InlineKeyboardButton(text="🛡 Проверить наказание", callback_data="menu:punish")],
     ]
     if is_owner:
@@ -172,11 +173,12 @@ def build_section_keyboard(section: str) -> InlineKeyboardMarkup:
     sections = {
         "game": [("👤 Игровой профиль", "view:game"), ("🎁 Ежедневная награда", "view:daily"), ("🏆 Рейтинг игроков", "view:top"), ("🎖 Достижения", "view:achievements")],
         "work": [("💼 Моя работа", "view:work"), ("📋 Список вакансий", "view:jobs")],
-        "organizations": [("🏛 Список фракций", "view:factions")],
+        "organizations": [("🏛 Список фракций", "view:factions"), ("⚔️ Управление фракцией", "input:faction"), ("👨‍👩‍👧 Семья", "input:family")],
         "economy": [("🛒 Магазин", "view:shop"), ("🎒 Инвентарь", "view:inventory"), ("🏠 Недвижимость", "view:property"), ("🚗 Гараж", "view:garage")],
         "city": [("📱 Телефон", "view:phone"), ("🗺 Карта города", "view:city"), ("📍 Места и организации", "view:places"), ("📅 События", "view:events")],
         "quests": [("📋 Задания", "view:quests"), ("⭐ Репутация", "view:reputation")],
-        "tournaments": [("🏆 Турниры", "view:tournaments")],
+        "tournaments": [("🏆 Турниры", "view:tournaments"), ("📝 Управление турниром", "input:tournament")],
+        "services": [("🏛 Госслужба", "input:gov"), ("🚓 Служба", "input:service"), ("🏥 Медицина", "input:med"), ("🎓 Образование", "input:edu"), ("🚌 Транспорт", "input:bus"), ("🚕 Такси", "input:taxi")],
     }
     rows = [[InlineKeyboardButton(text=label, callback_data=data)] for label, data in sections.get(section, [])]
     rows.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")])
@@ -420,6 +422,25 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
             await register_group(message, callback.bot, owner_id)
         return
 
+    if data.startswith("input:"):
+        action = data.split(":", 1)[1]
+        prompts = {
+            "faction": "Введите действие для фракции (например: info, members, claim, promote ID, demote ID, kick ID, transfer ID).",
+            "family": "Введите действие для семьи (например: info, create НАЗВАНИЕ, invite ID, kick ID).",
+            "tournament": "Введите действие (например: create Название 500, join ID, finish ID FAMILY_ID).",
+            "gov": "Введите действие госслужбы (например: departments, profile, join ID, salary, tasks).",
+            "service": "Введите действие службы (например: profile, apply МВД, tasks, leave).",
+            "med": "Введите действие медицины (например: profile, centers, apply ID, tasks, leave).",
+            "edu": "Введите действие образования (например: profile, institutions, groups, enroll ID).",
+            "bus": "Введите действие транспорта (например: routes, tickets, ticket 1, history).",
+            "taxi": "Введите действие такси (например: orders, order ROUTE FROM TO).",
+            "event": "Введите действие события (например: mine, join fair, leave fair).",
+        }
+        if action in prompts:
+            PENDING_INPUTS[callback.from_user.id] = action
+            await message.answer(prompts[action])
+        return
+
     if data == "menu:home":
         await message.answer("Главное меню:", reply_markup=build_main_keyboard(get_forum_url(), is_owner=owner_id > 0 and callback.from_user.id == owner_id))
     elif data.startswith("menu:"):
@@ -601,18 +622,28 @@ async def group_unmute_handler(message: Message, bot: Bot) -> None:
 
 
 async def button_input_handler(message: Message) -> None:
-    """Consume the next private text message requested by a menu button."""
+    """Consume text input requested by a button and route it to the feature handler."""
     if not message.from_user or not message.text:
         return
     action = PENDING_INPUTS.pop(message.from_user.id, None)
-    if action not in {"profile", "punish"}:
+    if not action:
         return
-    command = "profile" if action == "profile" else "punish"
-    synthetic_message = message.model_copy(update={"text": f"/{command} {message.text.strip()}"})
-    if action == "profile":
-        await cmd_profile(synthetic_message)
-    else:
-        await cmd_punish(synthetic_message)
+    if action in {"profile", "punish"}:
+        synthetic_message = message.model_copy(update={"text": f"/{action} {message.text.strip()}"})
+        await (cmd_profile if action == "profile" else cmd_punish)(synthetic_message)
+        return
+    from types import SimpleNamespace
+
+    handlers = {
+        "faction": manage_faction, "family": manage_family,
+        "tournament": manage_tournament, "gov": manage_government,
+        "service": manage_service, "med": manage_medical,
+        "edu": manage_education, "bus": manage_transport,
+        "taxi": manage_taxi, "event": manage_city_event,
+    }
+    handler = handlers.get(action)
+    if handler:
+        await handler(message, SimpleNamespace(command=action, args=message.text.strip(), prefix="/", mention=None))
 
 
 def create_dispatcher() -> Dispatcher:
