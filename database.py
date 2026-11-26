@@ -40,6 +40,17 @@ class Database:
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     PRIMARY KEY (chat_id, user_id)
                 );
+                CREATE TABLE IF NOT EXISTS moderation_events (
+                    id BIGSERIAL PRIMARY KEY,
+                    chat_id BIGINT NOT NULL,
+                    actor_id BIGINT,
+                    target_id BIGINT,
+                    action TEXT NOT NULL,
+                    details TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS moderation_events_chat_created_idx
+                    ON moderation_events (chat_id, created_at DESC);
             """)
 
     async def close(self) -> None:
@@ -91,6 +102,30 @@ class Database:
         await pool.execute(
             f"UPDATE registered_chats SET {column} = $2 WHERE chat_id = $1",
             chat_id, value,
+        )
+
+    async def log_moderation_event(
+        self, chat_id: int, actor_id: int | None, target_id: int | None,
+        action: str, details: str = "",
+    ) -> None:
+        pool = self._require_pool()
+        await pool.execute(
+            """INSERT INTO moderation_events
+               (chat_id, actor_id, target_id, action, details)
+               VALUES ($1, $2, $3, $4, $5)""",
+            chat_id, actor_id, target_id, action, details[:240],
+        )
+
+    async def get_recent_moderation_events(self, chat_id: int, limit: int = 10) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        safe_limit = max(1, min(int(limit), 20))
+        return await pool.fetch(
+            """SELECT actor_id, target_id, action, details, created_at
+               FROM moderation_events
+               WHERE chat_id = $1
+               ORDER BY created_at DESC, id DESC
+               LIMIT $2""",
+            chat_id, safe_limit,
         )
 
     async def registered_chat_count(self) -> int:

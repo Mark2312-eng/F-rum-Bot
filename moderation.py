@@ -2,6 +2,8 @@
 import re
 import time
 from collections import defaultdict, deque
+from datetime import timezone
+from html import escape
 
 from aiogram import Bot
 from aiogram.enums import ChatType
@@ -90,11 +92,17 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
                     permissions=ChatPermissions(can_send_messages=False),
                     until_date=int(time.time()) + 300,
                 )
+                await database.log_moderation_event(
+                    message.chat.id, None, message.from_user.id, "link_mute", "5 минут"
+                )
                 await message.answer(
                     f"🔇 {message.from_user.mention_html()}, отправка ссылок запрещена. Ограничение на 5 минут.",
                     parse_mode="HTML",
                 )
             else:
+                await database.log_moderation_event(
+                    message.chat.id, None, message.from_user.id, "link_deleted"
+                )
                 await message.answer(
                     f"⚠️ {message.from_user.mention_html()}, ссылки в этой группе разрешены только администраторам.",
                     parse_mode="HTML",
@@ -117,6 +125,9 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
     if len(history) > flood_limit:
         try:
             await message.delete()
+            await database.log_moderation_event(
+                message.chat.id, None, message.from_user.id, "flood_delete"
+            )
             await message.answer(
                 f"⏳ {message.from_user.mention_html()}, слишком много сообщений подряд. Сделай небольшую паузу.",
                 parse_mode="HTML",
@@ -142,6 +153,9 @@ async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
         await message.reply("Нельзя выдать предупреждение владельцу или администратору.")
         return
     count = await database.add_warning(message.chat.id, target.id)
+    await database.log_moderation_event(
+        message.chat.id, message.from_user.id, target.id, "warning", f"{count}/{WARNING_LIMIT}"
+    )
     if count >= WARNING_LIMIT:
         try:
             await bot.restrict_chat_member(
@@ -151,6 +165,9 @@ async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
                 until_date=int(time.time()) + 300,
             )
             await database.reset_warnings(message.chat.id, target.id)
+            await database.log_moderation_event(
+                message.chat.id, message.from_user.id, target.id, "auto_mute", "5 минут после 3 предупреждений"
+            )
             await message.answer(
                 f"🔇 {target.mention_html()} получил {WARNING_LIMIT} предупреждения и ограничен на 5 минут.",
                 parse_mode="HTML",
@@ -187,6 +204,9 @@ async def mute_member(message: Message, bot: Bot, owner_id: int) -> None:
             permissions=ChatPermissions(can_send_messages=False),
             until_date=int(time.time()) + 600,
         )
+        await database.log_moderation_event(
+            message.chat.id, message.from_user.id, target.id, "manual_mute", "10 минут"
+        )
         await message.answer(f"🔇 {target.mention_html()} ограничен на 10 минут.", parse_mode="HTML")
     except Exception:
         await message.reply("Не удалось применить ограничение. Проверь права бота.")
@@ -222,9 +242,58 @@ async def unmute_member(message: Message, bot: Bot, owner_id: int) -> None:
                 can_add_web_page_previews=True,
             ),
         )
+        await database.log_moderation_event(
+            message.chat.id, message.from_user.id, target.id, "unmute"
+        )
         await message.answer(f"🔊 Ограничение снято с {target.mention_html()}.", parse_mode="HTML")
     except Exception:
         await message.reply("Не удалось снять ограничение. Проверь права бота.")
+
+
+MODERATION_ACTION_LABELS = {
+    "link_deleted": "Удалена ссылка",
+    "link_mute": "Ограничение за ссылку",
+    "flood_delete": "Удалено сообщение (антифлуд)",
+    "warning": "Предупреждение",
+    "auto_mute": "Автоматическое ограничение",
+    "manual_mute": "Ручное ограничение",
+    "unmute": "Снято ограничение",
+}
+
+
+def format_moderation_log(events: list) -> str:
+    if not events:
+        return "📋 <b>Журнал модерации</b>\n\nСобытий пока нет."
+    lines = ["📋 <b>Последние события модерации</b>", ""]
+    for event in events:
+        action = MODERATION_ACTION_LABELS.get(event["action"], "Действие модерации")
+        target_id = event["target_id"]
+        actor_id = event["actor_id"]
+        timestamp = event["created_at"]
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        time_text = timestamp.astimezone(timezone.utc).strftime("%d.%m %H:%M UTC")
+        details = f" · {escape(str(event['details']))}" if event["details"] else ""
+        actor_text = f" · модератор <code>{actor_id}</code>" if actor_id else ""
+        lines.append(
+            f"• <b>{action}</b> — <code>{target_id if target_id is not None else '—'}</code>"
+            f"{details}{actor_text}\n  <i>{time_text}</i>"
+        )
+    return "\n".join(lines)
+
+
+async def show_moderation_log(message: Message, bot: Bot, owner_id: int) -> None:
+    if not is_group(message):
+        await message.answer("Команда /modlog доступна внутри подключённой группы.")
+        return
+    if not await database.is_chat_registered(message.chat.id):
+        await message.answer("Сначала подключите группу командой /connect от имени владельца бота.")
+        return
+    if not await is_moderator(message, bot, owner_id):
+        await message.answer("⛔ Журнал доступен только владельцу бота и администраторам группы.")
+        return
+    events = await database.get_recent_moderation_events(message.chat.id, 10)
+    await message.answer(format_moderation_log(events), parse_mode="HTML")
 
 
 def owner_summary(owner_id: int, chat_count: int) -> str:
@@ -235,5 +304,5 @@ def owner_summary(owner_id: int, chat_count: int) -> str:
         "Команды:\n"
         "/myid — показать ваш ID\n"
         "/chats — показать число подключённых групп\n"
-        "В группе: /connect, /settings, /warn, /mute, /unmute — ответом на сообщение."
+        "В группе: /connect, /settings, /modlog, /warn, /mute, /unmute — ответом на сообщение."
     )

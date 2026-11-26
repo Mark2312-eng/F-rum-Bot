@@ -2,6 +2,7 @@
 import os
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.enums import ChatType
 from aiogram.types import (
     CallbackQuery,
@@ -107,11 +108,17 @@ async def apply_setting_callback(callback: CallbackQuery, bot: Bot, owner_id: in
     column, _labels = mapping[category]
     await database.update_chat_setting(message.chat.id, column, value)
     settings = await database.get_chat_settings(message.chat.id)
-    await message.edit_text(
-        settings_text(settings),
-        parse_mode="HTML",
-        reply_markup=settings_keyboard(settings["moderation_mode"], settings["link_policy"]),
-    )
+    try:
+        await message.edit_text(
+            settings_text(settings),
+            parse_mode="HTML",
+            reply_markup=settings_keyboard(settings["moderation_mode"], settings["link_policy"]),
+        )
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            raise
+        await callback.answer("Эта настройка уже выбрана.")
+        return
     await callback.answer("Настройка сохранена.")
 
 
