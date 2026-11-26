@@ -92,6 +92,8 @@ class Database:
                     rank_name TEXT NOT NULL DEFAULT 'Новичок', joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     PRIMARY KEY (faction_id, user_id), UNIQUE (user_id)
                 );
+                ALTER TABLE game_faction_members ALTER COLUMN rank_name SET DEFAULT 'Рекрут';
+                UPDATE game_faction_members SET rank_name = 'Рекрут' WHERE rank_name = 'Новичок';
                 INSERT INTO game_factions (name, description)
                 VALUES
                     ('Правительство Москвы', 'Городские службы и управление городом.'),
