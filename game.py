@@ -103,7 +103,17 @@ async def show_achievements(message: Message) -> None:
 
 
 async def handle_game_callback(callback) -> None:
-    if callback.data == "game:daily" and callback.message and callback.from_user:
+    if callback.data == "game:profile" and callback.message and callback.from_user:
+        profile = await database.get_game_profile(
+            callback.from_user.id, display_name(callback.from_user)
+        )
+        achievements = await database.sync_game_achievements(callback.from_user.id)
+        await callback.message.answer(
+            format_game_profile(profile, achievements),
+            parse_mode="HTML",
+            reply_markup=game_keyboard(),
+        )
+    elif callback.data == "game:daily" and callback.message and callback.from_user:
         profile, reward, claimed = await database.claim_game_daily(
             callback.from_user.id, display_name(callback.from_user)
         )
