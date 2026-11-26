@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from moderation import contains_link, owner_summary
+from moderation import contains_link, format_moderation_log, owner_summary
 from group_settings import FLOOD_LABELS, LINK_LABELS, settings_keyboard, settings_text
 
 
@@ -25,6 +25,23 @@ class ModerationUnitTests(unittest.TestCase):
         self.assertIn("7", summary)
         self.assertIn("/warn", summary)
         self.assertNotIn("TOKEN", summary)
+
+    def test_moderation_log_formats_events(self):
+        from datetime import datetime, timezone
+        event = {
+            "action": "warning",
+            "target_id": 42,
+            "actor_id": 7,
+            "details": "1/3",
+            "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        }
+        rendered = format_moderation_log([event])
+        self.assertIn("Предупреждение", rendered)
+        self.assertIn("<code>42</code>", rendered)
+        self.assertIn("1/3", rendered)
+
+    def test_empty_moderation_log_has_placeholder(self):
+        self.assertIn("Событий пока нет", format_moderation_log([]))
 
     def test_settings_labels_cover_supported_values(self):
         self.assertEqual(set(FLOOD_LABELS), {"off", "balanced", "strict"})
