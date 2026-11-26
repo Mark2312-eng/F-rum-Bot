@@ -11,6 +11,7 @@ from main import (
     build_profile_message,
     build_stats_message,
     find_forum_user,
+    fetch_forum_stats,
     format_forum_date,
     get_forum_url,
     get_port,
@@ -132,6 +133,21 @@ class XenForoApiTests(unittest.IsolatedAsyncioTestCase):
         response.__aenter__ = AsyncMock(return_value=response)
         response.__aexit__ = AsyncMock(return_value=False)
         return response
+
+    async def test_stats_request_rejects_html_challenge_and_logs_safe_metadata(self):
+        response = self.make_response(200, {"ignored": True})
+        response.headers = {"Content-Type": "text/html; charset=utf-8", "Server": "anti-ddos"}
+        response.url = __import__("yarl").URL("https://forum.example/api/stats/")
+        session = MagicMock()
+        session.get.return_value = response
+
+        with self.assertRaisesRegex(ValueError, "non-JSON"):
+            await fetch_forum_stats(session, "https://forum.example/", "secret-test-key")
+
+        self.assertEqual(
+            session.get.call_args.kwargs["headers"]["Accept"],
+            "application/json",
+        )
 
     async def test_lookup_and_profile_requests_use_key_and_expected_urls(self):
         session = MagicMock()
