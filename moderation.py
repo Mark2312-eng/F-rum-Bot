@@ -54,7 +54,11 @@ async def is_moderator(message: Message, bot: Bot, owner_id: int) -> bool:
         return True
     if await is_chat_admin(bot, message.chat.id, message.from_user.id):
         return True
-    return await database.is_custom_moderator(message.chat.id, message.from_user.id)
+    if await database.is_custom_moderator(message.chat.id, message.from_user.id):
+        return True
+    from system_roles import has_permission
+    owner_id = int(__import__("os").getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    return await has_permission(message.from_user.id, owner_id, "moderation")
 
 
 async def register_group(message: Message, bot: Bot, owner_id: int) -> None:
