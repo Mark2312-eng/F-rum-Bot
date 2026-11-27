@@ -16,7 +16,7 @@ from aiogram.types import (
 )
 
 from database import database
-from system_roles import get_role, role_rank
+from system_roles import has_permission
 
 # Tests may grant any local role below the Chief Admin threshold.
 AUTO_ASSIGNABLE_ROLE_MIN = 1
@@ -28,7 +28,16 @@ def _is_auto_assignable_priority(priority: int) -> bool:
 
 
 async def _is_test_manager(user_id: int, owner_id: int) -> bool:
-    return role_rank(await get_role(user_id, owner_id)) >= 80
+    """Only staff explicitly granted the test-management permission may build tests."""
+    return await has_permission(user_id, owner_id, "testing_manage")
+
+
+async def _can_review_tests(user_id: int, owner_id: int) -> bool:
+    """Test reviewers and test managers may inspect test results."""
+    return (
+        await has_permission(user_id, owner_id, "testing_review")
+        or await has_permission(user_id, owner_id, "testing_manage")
+    )
 
 
 async def _private_manager(message: Message, owner_id: int) -> bool:
@@ -36,7 +45,17 @@ async def _private_manager(message: Message, owner_id: int) -> bool:
         await message.answer("Управление тестами доступно в личных сообщениях бота.")
         return False
     if not await _is_test_manager(message.from_user.id, owner_id):
-        await message.answer("⛔ Создавать и редактировать тесты могут сотрудники с приоритетом 80+.")
+        await message.answer("⛔ Для создания и редактирования тестов требуется должность с правом «Управление тестами».")
+        return False
+    return True
+
+
+async def _private_reviewer(message: Message, owner_id: int) -> bool:
+    if message.chat.type != ChatType.PRIVATE or not message.from_user:
+        await message.answer("Просмотр результатов доступен в личных сообщениях бота.")
+        return False
+    if not await _can_review_tests(message.from_user.id, owner_id):
+        await message.answer("⛔ Для просмотра результатов требуется право «Проверка тестов».")
         return False
     return True
 
@@ -452,7 +471,7 @@ async def test_answer_callback(callback: CallbackQuery) -> None:
 
 
 async def test_results_command(message: Message, owner_id: int) -> None:
-    if not await _private_manager(message, owner_id):
+    if not await _private_reviewer(message, owner_id):
         return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit():

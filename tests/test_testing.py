@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from testing import (
     AUTO_ASSIGNABLE_ROLE_MAX, AUTO_ASSIGNABLE_ROLE_MIN,
-    _is_auto_assignable_priority, _is_test_manager, _parse_fields,
+    _can_review_tests, _is_auto_assignable_priority, _is_test_manager, _parse_fields,
 )
 
 
@@ -29,17 +29,33 @@ class TestBuilderParsingTests(unittest.TestCase):
 
 
 class TestManagerPermissionTests(unittest.IsolatedAsyncioTestCase):
-    async def test_deputy_and_director_can_manage_tests(self):
-        with patch("testing.get_role", new=AsyncMock(return_value="deputy")):
-            self.assertTrue(await _is_test_manager(10, 1))
-        with patch("testing.get_role", new=AsyncMock(return_value="director")):
-            self.assertTrue(await _is_test_manager(11, 1))
+    def permission_checker(self, role):
+        from system_roles import ROLES
+        async def check(_user_id, _owner_id, permission):
+            if role == "owner":
+                return True
+            return permission in ROLES.get(role or "", {}).get("permissions", set())
+        return check
 
-    async def test_lower_roles_cannot_manage_tests(self):
-        for role in ("chief_curator", "chief_admin", "moderator", "developer", None):
+    async def test_qa_leadership_can_manage_tests(self):
+        for role in ("deputy_chief_tester", "qa_head", "project_team", "director", "deputy"):
             with self.subTest(role=role):
-                with patch("testing.get_role", new=AsyncMock(return_value=role)):
+                with patch("testing.has_permission", new=AsyncMock(side_effect=self.permission_checker(role))):
+                    self.assertTrue(await _is_test_manager(10, 1))
+
+    async def test_testers_can_review_but_not_manage_tests(self):
+        for role in ("qa_specialist", "senior_tester", "tester", "junior_tester"):
+            with self.subTest(role=role):
+                with patch("testing.has_permission", new=AsyncMock(side_effect=self.permission_checker(role))):
+                    self.assertTrue(await _can_review_tests(12, 1))
                     self.assertFalse(await _is_test_manager(12, 1))
+
+    async def test_unrelated_roles_cannot_manage_or_review_tests(self):
+        for role in ("chief_tech_specialist", "tech_specialist", "moderator", "developer", None):
+            with self.subTest(role=role):
+                with patch("testing.has_permission", new=AsyncMock(side_effect=self.permission_checker(role))):
+                    self.assertFalse(await _is_test_manager(13, 1))
+                    self.assertFalse(await _can_review_tests(13, 1))
 
 
 if __name__ == "__main__":

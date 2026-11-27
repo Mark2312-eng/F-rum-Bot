@@ -16,8 +16,8 @@ ROLES = {
 
 # Compatibility keys retained for existing database assignments.
 LEGACY_ROLES = {
-    "director": {"title": "Директор бота", "rank": 90, "permissions": {"staff_manage", "staff_view", "moderation", "reports", "settings", "technical", "support"}},
-    "deputy": {"title": "Заместитель директора", "rank": 80, "permissions": {"staff_manage", "staff_view", "moderation", "reports", "settings", "support"}},
+    "director": {"title": "Директор бота", "rank": 90, "permissions": {"staff_manage", "staff_view", "moderation", "reports", "settings", "technical", "support", "testing_manage"}},
+    "deputy": {"title": "Заместитель директора", "rank": 80, "permissions": {"staff_manage", "staff_view", "moderation", "reports", "settings", "support", "testing_manage"}},
     "chief_curator": {"title": "Главный куратор", "rank": 70, "permissions": {"staff_view", "moderation", "reports", "settings"}},
     "curator": {"title": "Куратор", "rank": 60, "permissions": {"staff_view", "moderation", "reports"}},
     "chief_admin": {"title": "Главный администратор", "rank": 55, "permissions": {"staff_view", "moderation", "reports", "settings"}},
@@ -258,8 +258,10 @@ async def rolehelp_command(message: Message, owner_id: int) -> None:
         lines.extend(["", "<b>Техника:</b> /syshealth"])
     if role == "owner" or "support" in permissions:
         lines.extend(["", "<b>Поддержка:</b> /reporthelp"])
-    if "testing_review" in permissions:
-        lines.extend(["", "<b>Контроль качества:</b> доступ к проверке результатов тестирования"])
+    if "testing_manage" in permissions:
+        lines.extend(["", "<b>Тестирование:</b> /createtest, /testadd, /sendtest, /testresults"])
+    elif "testing_review" in permissions:
+        lines.extend(["", "<b>Контроль качества:</b> /testresults — просмотр результатов тестирования"])
     if "organizations" in permissions:
         lines.extend(["", "<b>Организации:</b> доступ к направлению организаций"])
     if "discord_moderation" in permissions:
