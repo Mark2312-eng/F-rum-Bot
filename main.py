@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from database import database
 from moderation import ban_member, clear_warnings, kick_member, moderate_message, mute_member, owner_summary, purge_messages, register_group, show_moderation_log, show_moderation_stats, show_warnings, unban_member, unmute_member, warn_member
 from group_settings import apply_setting_callback, show_group_settings
+from advanced_moderation import blacklist_command, nickname_command, report_command, reportclose_command, reports_command, role_command
 
 load_dotenv()
 
@@ -387,6 +388,12 @@ async def cmd_help(message: Message) -> None:
         "/modstats — статистика модерации за 7 дней\\n"
         "/settings — настройки антифлуда и ссылок\\n"
         "/modlog — журнал модерации\\n"
+        "/report причина — пожаловаться на сообщение (ответом)\\n"
+        "/reports — очередь жалоб\\n"
+        "/reportclose ID — закрыть жалобу\\n"
+        "/blacklist add/del/list — общий чёрный список\\n"
+        "/nick set Имя или /nick ID — никнеймы группы\\n"
+        "/role add/del/list — дополнительные модераторы\\n"
         "/connect — подключить группу (владелец бота).\\n\\n"
         "Команды модерации доступны владельцу и администраторам подключённой группы. "
         "Боту нужны права администратора.",
@@ -688,6 +695,31 @@ async def button_input_handler(message: Message) -> None:
         await handlers[action](synthetic, message.bot)
 
 
+async def advanced_reports_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await reports_command(message, bot, owner_id)
+
+
+async def advanced_reportclose_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await reportclose_command(message, bot, owner_id)
+
+
+async def advanced_blacklist_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await blacklist_command(message, bot, owner_id)
+
+
+async def advanced_nickname_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await nickname_command(message, bot, owner_id)
+
+
+async def advanced_role_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await role_command(message, bot, owner_id)
+
+
 def create_dispatcher() -> Dispatcher:
     """Configure the moderation-first Telegram dispatcher."""
     dispatcher = Dispatcher()
@@ -712,6 +744,12 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(group_warns_handler, Command("warns"))
     dispatcher.message.register(group_clearwarns_handler, Command("clearwarns"))
     dispatcher.message.register(group_modstats_handler, Command("modstats"))
+    dispatcher.message.register(report_command, Command("report"))
+    dispatcher.message.register(advanced_reports_handler, Command("reports"))
+    dispatcher.message.register(advanced_reportclose_handler, Command("reportclose"))
+    dispatcher.message.register(advanced_blacklist_handler, Command("blacklist"))
+    dispatcher.message.register(advanced_nickname_handler, Command("nick"))
+    dispatcher.message.register(advanced_role_handler, Command("role"))
     dispatcher.message.register(button_input_handler, lambda message: bool(message.from_user and message.from_user.id in PENDING_INPUTS))
     dispatcher.message.register(group_moderation_handler)
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
@@ -753,6 +791,12 @@ async def main() -> None:
             BotCommand(command="settings", description="Настройки модерации"),
             BotCommand(command="modlog", description="Журнал модерации"),
             BotCommand(command="modstats", description="Статистика модерации"),
+            BotCommand(command="report", description="Отправить жалобу"),
+            BotCommand(command="reports", description="Очередь жалоб"),
+            BotCommand(command="reportclose", description="Закрыть жалобу"),
+            BotCommand(command="blacklist", description="Общий чёрный список"),
+            BotCommand(command="nick", description="Никнеймы группы"),
+            BotCommand(command="role", description="Роли модерации"),
             BotCommand(command="warn", description="Выдать предупреждение"),
             BotCommand(command="warns", description="Проверить предупреждения"),
             BotCommand(command="clearwarns", description="Сбросить предупреждения"),
