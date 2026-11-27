@@ -18,6 +18,14 @@
     <nav class="desktop-nav" aria-label="Основная навигация">
       <a href="#features">Возможности</a><a href="#workflow">Как работает</a><a href="#commands">Команды</a>
     </nav>
+    <details class="mobile-nav">
+      <summary aria-label="Открыть меню">Меню <span>☰</span></summary>
+      <nav aria-label="Мобильная навигация">
+        <a href="#features">Возможности</a>
+        <a href="#workflow">Как работает</a>
+        <a href="#commands">Команды</a>
+      </nav>
+    </details>
     <a class="header-cta" href="https://t.me/ViseRussiaHelpForumBot" target="_blank" rel="noopener">Открыть бота <span>↗</span></a>
   </header>
 
@@ -67,14 +75,15 @@
     <section id="commands" class="section commands-section">
       <div class="section-heading"><div><p class="eyebrow">БЫСТРЫЙ СПРАВОЧНИК / 03</p><h2>Основные <span>команды.</span></h2></div><p class="section-intro">Краткий список команд для начала работы. Доступность зависит от прав пользователя и типа чата.</p></div>
       <div class="command-list">
-        <div><code>/help</code><span>Справочник доступных команд</span><small>ОСНОВНОЕ</small></div>
-        <div><code>/connect</code><span>Подключение Telegram-группы</span><small>НАСТРОЙКА</small></div>
-        <div><code>/settings</code><span>Настройки модерации</span><small>НАСТРОЙКА</small></div>
+        <div><code>/help</code><span>Список команд и краткая справка</span><small>ОСНОВНОЕ</small></div>
+        <div><code>/connect</code><span>Подключение текущей группы владельцем бота</span><small>НАСТРОЙКА</small></div>
+        <div><code>/settings</code><span>Настройки антифлуда и ссылок в группе</span><small>НАСТРОЙКА</small></div>
         <div><code>/modlog</code><span>Журнал действий модерации</span><small>МОДЕРАЦИЯ</small></div>
-        <div><code>/roles</code><span>Управление ролями группы</span><small>ДОСТУПЫ</small></div>
-        <div><code>/createtest</code><span>Создание теста</span><small>ТЕСТЫ</small></div>
-        <div><code>/sendtest</code><span>Отправка приглашения на тест</span><small>ТЕСТЫ</small></div>
-        <div><code>/testresults</code><span>Просмотр результатов тестирования</span><small>ТЕСТЫ</small></div>
+        <div><code>/roles</code><span>Список ролей и уровней доступа группы</span><small>ДОСТУПЫ</small></div>
+        <div><code>/createtest</code><span>Создание теста для команды</span><small>ТЕСТЫ</small></div>
+        <div><code>/testadd</code><span>Добавление вопроса в тест</span><small>ТЕСТЫ</small></div>
+        <div><code>/sendtest</code><span>Приглашение: /sendtest TELEGRAM_ID ID_ТЕСТА</span><small>ТЕСТЫ</small></div>
+        <div><code>/testresults</code><span>Просмотр результатов тестирования по ID теста</span><small>ТЕСТЫ</small></div>
       </div>
     </section>
 
