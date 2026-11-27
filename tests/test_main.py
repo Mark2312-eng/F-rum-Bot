@@ -17,6 +17,7 @@ from main import (
     acquire_telegram_polling_lock,
     POLLING_ADVISORY_LOCK_ID,
     _panel_require_owner,
+    panel_people,
     build_main_keyboard,
     build_section_keyboard,
     build_player_message,
@@ -359,6 +360,16 @@ class PanelRoleAuthorizationTests(unittest.IsolatedAsyncioTestCase):
              patch("main._panel_user", return_value=456):
             with self.assertRaises(web.HTTPForbidden):
                 await _panel_require_owner(request)
+
+    async def test_people_endpoint_requires_owner(self):
+        from unittest.mock import patch
+
+        request = MagicMock()
+        with patch("main._panel_require_owner", new=AsyncMock(side_effect=web.HTTPForbidden())) as require_owner:
+            with self.assertRaises(web.HTTPForbidden):
+                await panel_people(request)
+        require_owner.assert_awaited_once_with(request)
+
 
 
 if __name__ == "__main__":

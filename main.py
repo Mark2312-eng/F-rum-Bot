@@ -580,9 +580,7 @@ async def _panel_require_owner(request: web.Request) -> int:
 
 async def panel_people(request: web.Request) -> web.Response:
     """List members and role definitions for the owner-only people workspace."""
-    user_id = _panel_user(request)
-    if user_id is None:
-        return _panel_cors(request, web.json_response({"error": "Требуется авторизация."}, status=401))
+    await _panel_require_owner(request)
     pool = database._require_pool()
     chat_id_raw = request.query.get("chat_id", "").strip()
     chats = await pool.fetch(
