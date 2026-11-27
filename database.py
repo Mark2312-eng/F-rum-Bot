@@ -136,6 +136,70 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS system_staff_log_created_idx
                     ON system_staff_log (created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS moderation_tests (
+                    id BIGSERIAL PRIMARY KEY,
+                    title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 120),
+                    creator_id BIGINT NOT NULL,
+                    chat_id BIGINT NOT NULL REFERENCES registered_chats(chat_id) ON DELETE CASCADE,
+                    role_key TEXT NOT NULL CHECK (role_key IN ('moderator')),
+                    pass_score INTEGER NOT NULL CHECK (pass_score BETWEEN 1 AND 100),
+                    cooldown_days INTEGER NOT NULL DEFAULT 7 CHECK (cooldown_days BETWEEN 0 AND 90),
+                    time_limit_minutes INTEGER NOT NULL DEFAULT 30 CHECK (time_limit_minutes BETWEEN 1 AND 240),
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS moderation_tests_creator_idx
+                    ON moderation_tests (creator_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS moderation_test_questions (
+                    id BIGSERIAL PRIMARY KEY,
+                    test_id BIGINT NOT NULL REFERENCES moderation_tests(id) ON DELETE CASCADE,
+                    position INTEGER NOT NULL CHECK (position > 0),
+                    prompt TEXT NOT NULL CHECK (char_length(prompt) BETWEEN 1 AND 1000),
+                    options JSONB NOT NULL,
+                    correct_option INTEGER NOT NULL DEFAULT 0 CHECK (correct_option >= 0),
+                    UNIQUE (test_id, position)
+                );
+                CREATE TABLE IF NOT EXISTS moderation_test_invites (
+                    token_hash TEXT PRIMARY KEY,
+                    test_id BIGINT NOT NULL REFERENCES moderation_tests(id) ON DELETE CASCADE,
+                    target_user_id BIGINT NOT NULL,
+                    issued_by BIGINT NOT NULL,
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    used_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE TABLE IF NOT EXISTS moderation_test_sessions (
+                    id BIGSERIAL PRIMARY KEY,
+                    token_hash TEXT NOT NULL UNIQUE REFERENCES moderation_test_invites(token_hash) ON DELETE CASCADE,
+                    test_id BIGINT NOT NULL REFERENCES moderation_tests(id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL,
+                    current_position INTEGER NOT NULL DEFAULT 1 CHECK (current_position > 0),
+                    score INTEGER NOT NULL DEFAULT 0 CHECK (score >= 0),
+                    expires_at TIMESTAMPTZ NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'passed', 'failed', 'expired')),
+                    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    completed_at TIMESTAMPTZ
+                );
+                CREATE INDEX IF NOT EXISTS moderation_test_sessions_user_idx
+                    ON moderation_test_sessions (user_id, started_at DESC);
+                CREATE TABLE IF NOT EXISTS moderation_test_results (
+                    id BIGSERIAL PRIMARY KEY,
+                    test_id BIGINT NOT NULL REFERENCES moderation_tests(id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL,
+                    score_percent INTEGER NOT NULL CHECK (score_percent BETWEEN 0 AND 100),
+                    passed BOOLEAN NOT NULL,
+                    role_assigned TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS moderation_test_results_test_idx
+                    ON moderation_test_results (test_id, created_at DESC);
+                CREATE TABLE IF NOT EXISTS moderation_test_cooldowns (
+                    test_id BIGINT NOT NULL REFERENCES moderation_tests(id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL,
+                    available_at TIMESTAMPTZ NOT NULL,
+                    PRIMARY KEY (test_id, user_id)
+                );
             """)
 
     async def close(self) -> None:
