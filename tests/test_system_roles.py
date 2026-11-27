@@ -34,7 +34,7 @@ class SystemRoleTests(unittest.IsolatedAsyncioTestCase):
     def test_role_hierarchy_requires_strictly_higher_rank(self):
         self.assertEqual(role_rank("owner"), 100)
         self.assertEqual(role_rank("project_team"), 95)
-        self.assertEqual(role_rank("moderator"), 55)
+        self.assertEqual(role_rank("moderator"), 30)\n        self.assertEqual(role_rank("chat_moderator"), 55)
         self.assertEqual(role_rank(None), 0)
         self.assertTrue(can_manage_rank(60, 30))
         self.assertFalse(can_manage_rank(30, 30))
