@@ -31,8 +31,21 @@ function renderPeople(data){
     const canEdit=!!data.selected_chat_id;
     const selector=canEdit?'<select class="role-select" aria-label="Новая роль для '+esc(x.user_id)+'"><option value="">Выберите роль</option>'+data.roles.map(r=>'<option value="'+esc(r.role_key)+'">'+esc(r.title)+' · '+esc(r.priority)+'</option>').join("")+'</select>':'<span class="muted-cell">Только просмотр</span>';
     const actions=canEdit?'<button class="button button-secondary assign-member-role" data-user-id="'+esc(x.user_id)+'" type="button">Назначить</button>'+(x.role_key?'<button class="button button-quiet remove-member-role" data-user-id="'+esc(x.user_id)+'" type="button">Снять</button>':''):'—';
-    return '<tr><td>'+esc(x.display_name||x.username||x.user_id)+(x.username?' <span class="muted-cell">@'+esc(x.username)+'</span>':'')+'<div class="muted-cell">ID '+esc(x.user_id)+' · '+esc(x.chat_title||"")+'</div></td><td>'+esc(x.message_count)+' сообщений<div class="muted-cell">С нами с '+esc(date(x.first_seen_at))+'</div></td><td>'+esc(x.warning_count)+'</td><td>'+esc(x.role_title||"Участник")+' <span class="muted-cell">приоритет '+esc(x.priority)+'</span></td><td><div class="role-actions">'+selector+actions+'</div></td></tr>';
+    const historyButton='<button class="button button-quiet member-history" data-chat-id="'+esc(x.chat_id)+'" data-user-id="'+esc(x.user_id)+'" type="button">История</button>';
+    return '<tr><td>'+esc(x.display_name||x.username||x.user_id)+(x.username?' <span class="muted-cell">@'+esc(x.username)+'</span>':'')+'<div class="muted-cell">ID '+esc(x.user_id)+' · '+esc(x.chat_title||"")+'</div></td><td>'+esc(x.message_count)+' сообщений<div class="muted-cell">С нами с '+esc(date(x.first_seen_at))+'</div></td><td>'+esc(x.warning_count)+'</td><td>'+esc(x.role_title||"Участник")+' <span class="muted-cell">приоритет '+esc(x.priority)+'</span></td><td><div class="role-actions">'+historyButton+selector+actions+'</div></td></tr>';
   })); 
+}
+async function loadMemberHistory(chatId,userId){
+  const node=$("member-history");
+  node.hidden=false;
+  node.innerHTML='<p class="empty"><span class="spinner"></span> Загружаем историю участника…</p>';
+  node.scrollIntoView({behavior:"smooth",block:"nearest"});
+  try{
+    const data=await request("/api/members/"+encodeURIComponent(chatId)+"/"+encodeURIComponent(userId)+"/history");
+    const m=data.member;
+    node.innerHTML='<div class="member-history-head"><div><b>'+esc(m.display_name||m.username||m.user_id)+'</b><small>'+esc(m.chat_title||m.chat_id)+' · ID '+esc(m.user_id)+(m.username?' · @'+esc(m.username):'')+'</small></div><button class="button button-quiet" id="close-member-history" type="button">Скрыть</button></div><div class="member-history-stats"><span>Сообщения <b>'+esc(m.message_count)+'</b></span><span>Предупреждения <b>'+esc(m.warning_count)+'</b></span><span>Роль <b>'+esc(m.role_title)+' · '+esc(m.priority)+'</b></span><span>В группе с <b>'+esc(date(m.first_seen_at))+'</b></span></div>'+table(["Действие","Модератор","Детали","Дата"],data.events.map(e=>'<tr><td>'+esc(e.action)+'</td><td>'+esc(e.actor_id??"Автоматически")+'</td><td>'+esc(e.details||"—")+'</td><td>'+esc(date(e.created_at))+'</td></tr>'))+(data.events.length?'':'<p class="empty">Записей о действиях над участником пока нет.</p>');
+    $("close-member-history").addEventListener("click",()=>{node.hidden=true;node.innerHTML="";});
+  }catch(error){node.innerHTML='<p class="notice">'+esc(error.message)+'</p>';}
 }
 async function loadPeople(){
   if(peopleLoading)return;
@@ -61,6 +74,8 @@ $("people-chat").addEventListener("change",loadPeople);
 $("people-find").addEventListener("click",loadPeople);
 $("people-search").addEventListener("keydown",event=>{if(event.key==="Enter"){event.preventDefault();loadPeople();}});
 $("people-table").addEventListener("click",async event=>{
+  const history=event.target.closest(".member-history");
+  if(history){loadMemberHistory(history.dataset.chatId,history.dataset.userId);return;}
   const assign=event.target.closest(".assign-member-role");
   const remove=event.target.closest(".remove-member-role");
   const button=assign||remove;if(!button)return;

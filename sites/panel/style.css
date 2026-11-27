@@ -146,3 +146,13 @@ tbody tr:hover{background:#18251d}
 .role-select{padding:8px 9px}
 .people-note{margin:14px 0 0;color:#75847a;font-size:10px;line-height:1.7}
 @media(max-width:760px){.people-controls{grid-template-columns:1fr}.role-actions{min-width:230px}}
+
+
+.member-history{margin:18px 0;padding:18px;border:1px solid var(--line,#29342e);border-radius:14px;background:rgba(255,255,255,.025)}
+.member-history-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px}
+.member-history-head b{display:block;font-size:15px}
+.member-history-head small{display:block;margin-top:5px;color:#89978d;font-size:11px}
+.member-history-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:14px}
+.member-history-stats span{padding:10px;border-radius:9px;background:rgba(255,255,255,.035);color:#89978d;font-size:11px}
+.member-history-stats b{display:block;margin-top:5px;color:#e8eee9;font-size:13px}
+@media(max-width:600px){.member-history{padding:12px}.member-history-head{align-items:flex-start}}
