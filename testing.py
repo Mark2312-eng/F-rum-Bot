@@ -64,11 +64,15 @@ async def create_test_command(message: Message, owner_id: int) -> None:
     if not 1 <= len(title) <= 120:
         await message.answer("Название должно содержать от 1 до 120 символов.")
         return
+    pool = database._require_pool()
+    if not await database.is_chat_registered(chat_id):
+        await message.answer("Эта группа не подключена к боту. Сначала выполните /connect от имени владельца.")
+        return
     role = await pool.fetchrow(
         """SELECT role_key, title, priority FROM chat_role_definitions
            WHERE chat_id = $1 AND role_key = $2""",
         chat_id, role_key,
-    ) if await database.is_chat_registered(chat_id) else None
+    )
     if not role or not AUTO_ASSIGNABLE_ROLE_MIN <= int(role["priority"]) <= AUTO_ASSIGNABLE_ROLE_MAX:
         await message.answer(
             "Роль не найдена в этой группе или её приоритет вне диапазона 1–79. "
@@ -79,10 +83,6 @@ async def create_test_command(message: Message, owner_id: int) -> None:
         await message.answer("Допустимые значения: балл 1–100, кулдаун 0–90 дней, таймер 1–240 минут.")
         return
 
-    pool = database._require_pool()
-    if not role:
-        await message.answer("Эта группа не подключена к боту или роль недоступна.")
-        return
     test_id = await pool.fetchval(
         """INSERT INTO moderation_tests
            (title, creator_id, chat_id, role_key, pass_score, cooldown_days, time_limit_minutes)
