@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#0b1110">
-  <meta name="description" content="Закрытая панель управления F-rum-Bot. Вход только для владельца через Telegram.">
+  <meta name="description" content="Закрытая панель управления F-rum-Bot. Вход через Telegram с проверкой системной роли.">
   <title>F-rum-Bot — панель управления</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -21,16 +21,16 @@
       <div class="login-copy">
         <div class="eyebrow">ЗАКРЫТЫЙ ДОСТУП <span> / 01</span></div>
         <h1>Всё под<br><span>контролем.</span></h1>
-        <p class="lead">Центр управления модерацией F-rum-Bot. Войдите через Telegram — доступ проверяется сервером.</p>
+        <p class="lead">Закрытая панель F-rum-Bot. Владелец и сотрудники поддержки получают доступ только к разрешённым разделам.</p>
         <div class="trust-list">
-          <div><span class="check">✓</span><span>Только аккаунт владельца</span></div>
+          <div><span class="check">✓</span><span>Доступ владельца и сотрудников с нужными правами</span></div>
           <div><span class="check">✓</span><span>Защищённая проверка Telegram</span></div>
           <div><span class="check">✓</span><span>Сессия автоматически завершается</span></div>
         </div>
       </div>
       <div class="auth-card">
         <div class="auth-icon">↗</div><h2>Вход в систему</h2>
-        <p>Подтвердите личность в Telegram, чтобы открыть панель.</p>
+        <p>Подтвердите аккаунт в Telegram. Набор доступных разделов зависит от вашей системной роли.</p>
         <div id="login-widget" class="widget-slot" aria-live="polite"><p class="notice"><span class="spinner"></span> Подготавливаем безопасный вход…</p></div>
         <p id="message" class="message" role="status" aria-live="polite"></p>
         <div class="auth-note"><span class="lock">▣</span> Мы не запрашиваем пароль или код Telegram.</div>
@@ -43,7 +43,7 @@
         <div class="dash-actions"><span class="live-label"><span class="status-dot"></span> СЕССИЯ АКТИВНА</span><button id="refresh" class="button button-secondary" type="button">↻ Обновить</button><button id="export-csv" class="button button-quiet" type="button">↓ Экспорт CSV</button><button id="logout" class="button button-quiet" type="button">Выйти</button></div>
       </div>
       <nav class="dash-nav" aria-label="Разделы панели">
-        <a class="active" href="#overview">Обзор</a><a href="#reports">Жалобы</a><a href="#members">Участники</a><a href="#audit">Журнал</a><a href="#groups">Группы</a><a href="#tests">Тесты</a><a href="#results">Результаты</a>
+        <a class="active" href="#overview">Обзор</a><a href="#reports">Жалобы</a><a href="#members">Участники</a><a href="#audit">Журнал</a><a href="#groups">Группы</a><a href="#tests">Тесты</a><a href="#results">Результаты</a><a href="#support">Поддержка</a>
       </nav>
       <div id="overview" class="section-label"><span>01 / СВОДКА</span><span id="updated-at">Загрузка данных…</span></div>
       <div id="stats" class="stats" aria-live="polite"></div>
@@ -54,6 +54,11 @@
       <section id="reports" class="block"><div class="block-head"><div><span class="section-index">03.1</span><h2>Очередь жалоб</h2><p>Открытые обращения участников из подключённых групп</p></div><span id="reports-count" class="count">—</span></div><div id="reports-table"></div></section>
       <section id="members" class="block"><div class="block-head"><div><span class="section-index">03.2</span><h2>Участники</h2><p>Известная активность, роли и предупреждения</p></div><span id="members-count" class="count">—</span></div><div id="members-table"></div></section>
       <section id="audit" class="block"><div class="block-head"><div><span class="section-index">03.3</span><h2>Журнал модерации</h2><p>Последние действия бота и модераторов</p></div><span id="events-count" class="count">—</span></div><div id="events-table"></div></section>
+      <section id="support" class="block">
+        <div class="block-head"><div><span class="section-index">04</span><h2>Поддержка</h2><p>Общие обращения с сайта и из Telegram</p></div><span id="support-count" class="count">—</span></div>
+        <div class="support-panel-toolbar"><label>Фильтр <select id="support-filter"><option value="active">Активные</option><option value="all">Все</option><option value="closed">Закрытые</option></select></label><button id="support-reload" class="button button-secondary" type="button">↻ Обновить</button></div>
+        <div class="support-panel-grid"><div id="support-queue" class="support-queue"><p class="empty">Загрузка обращений…</p></div><div id="support-conversation" class="support-conversation"><p class="empty">Выберите обращение слева.</p></div></div>
+      </section>
       <p id="dashboard-error" class="message" role="status" aria-live="polite"></p>
     </section>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

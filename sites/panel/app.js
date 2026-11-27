@@ -19,7 +19,7 @@ $("reports-table").innerHTML=table(["№","Группа","Отправитель
 $("members-table").innerHTML=table(["Участник","Группа","Роль","Сообщения","Предупреждения","Впервые замечен"],m.members.map(x=>'<tr><td>'+esc(x.display_name||x.username||x.user_id)+(x.username?' <span class="muted-cell">@'+esc(x.username)+'</span>':'')+'<div class="muted-cell">ID '+esc(x.user_id)+'</div></td><td>'+esc(x.chat_title||x.chat_id)+'</td><td>'+esc(x.role_title||"Участник")+'</td><td>'+esc(x.message_count)+'</td><td>'+esc(x.warning_count)+'</td><td>'+esc(date(x.first_seen_at))+'</td></tr>'));
 $("events-table").innerHTML=table(["Группа","Действие","Модератор","Участник","Детали","Дата"],m.events.map(x=>'<tr><td>'+esc(x.chat_title||x.chat_id)+'</td><td>'+esc(x.action)+'</td><td>'+esc(x.actor_id??"Автоматически")+'</td><td>'+esc(x.target_id??"—")+'</td><td>'+esc(x.details)+'</td><td>'+esc(date(x.created_at))+'</td></tr>'));
 $("updated-at").textContent="ОБНОВЛЕНО · "+new Date().toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"});$("dashboard-error").textContent="";updateSearch();}
-async function loadDashboard(){if(refreshing||$("dashboard").hidden)return;refreshing=true;$("refresh").disabled=true;$("refresh").textContent="Обновление…";try{const [d,m]=await Promise.all([request("/api/dashboard"),request("/api/moderation")]);renderDashboard(d,m);}catch(e){$("dashboard-error").textContent=e.message;if(e.message.includes("Сначала войдите"))stopAutoRefresh();}finally{refreshing=false;$("refresh").disabled=false;$("refresh").textContent="↻ Обновить";}}
+async function loadDashboard(){if(refreshing||$("dashboard").hidden)return;refreshing=true;$("refresh").disabled=true;$("refresh").textContent="Обновление…";try{const [d,m]=await Promise.all([request("/api/dashboard"),request("/api/moderation")]);renderDashboard(d,m);await loadSupportQueue();}catch(e){$("dashboard-error").textContent=e.message;if(e.message.includes("Сначала войдите"))stopAutoRefresh();}finally{refreshing=false;$("refresh").disabled=false;$("refresh").textContent="↻ Обновить";}}
 function startAutoRefresh(){stopAutoRefresh();refreshTimer=setInterval(()=>{if(!document.hidden)loadDashboard();},60000);}
 function stopAutoRefresh(){if(refreshTimer){clearInterval(refreshTimer);refreshTimer=null;}}
 function exportCsv(){const tables=[...document.querySelectorAll(".table-wrap table")];if(!tables.length){toast("Нет данных для экспорта.","error");return;}const lines=[];for(const t of tables){const title=t.closest(".block")?.querySelector("h2")?.textContent||"Раздел";lines.push([title]);for(const row of t.querySelectorAll("tr")){if(row.hidden)continue;const cells=[...row.querySelectorAll("th,td")].map(cell=>{let value=cell.innerText.replace(/\s+/g," ").trim();if(/^[=+@-]/.test(value))value="'"+value;return '"'+value.replace(/"/g,'""')+'"';});lines.push(cells);}lines.push([]);}const csv="\uFEFF"+lines.map(row=>row.join(";")).join("\r\n");const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="vise-russia-panel-"+new Date().toISOString().slice(0,10)+".csv";document.body.append(a);a.click();a.remove();URL.revokeObjectURL(url);toast("Экспорт CSV подготовлен.");}
@@ -31,4 +31,47 @@ $("reports-table").addEventListener("click",async event=>{const button=event.tar
 document.querySelectorAll(".dash-nav a").forEach(link=>link.addEventListener("click",()=>{document.querySelectorAll(".dash-nav a").forEach(x=>x.classList.remove("active"));link.classList.add("active");}));
 document.addEventListener("keydown",event=>{if(event.key==="/"&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!["INPUT","TEXTAREA"].includes(document.activeElement.tagName)){event.preventDefault();$("table-search").focus();}if(event.key==="Escape"&&document.activeElement===$("table-search")){$("table-search").value="";updateSearch();}});
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&!$("dashboard").hidden)loadDashboard();});
+
+let supportQueueData=[];
+let selectedSupportTicket=null;
+async function loadSupportQueue(){
+  const node=$("support-queue");if(!node)return;
+  try{
+    const data=await request("/api/support/staff/tickets");
+    supportQueueData=data.tickets||[];
+    $("support-count").textContent=supportQueueData.filter(x=>x.status!=="closed").length;
+    renderSupportQueue();
+  }catch(error){node.innerHTML='<p class="empty">'+esc(error.message)+'</p>';}
+}
+function renderSupportQueue(){
+  const filter=$("support-filter")?.value||"active";
+  const rows=supportQueueData.filter(ticket=>filter==="all"||(filter==="closed"?ticket.status==="closed":ticket.status!=="closed"));
+  $("support-queue").innerHTML=rows.length?rows.map(ticket=>'<button class="support-queue-item '+(String(ticket.id)===String(selectedSupportTicket)?'active':'')+'" data-support-id="'+esc(ticket.id)+'" type="button"><span><b>#'+esc(ticket.id)+' · '+esc(ticket.subject)+'</b><small>'+esc(ticket.username?'@'+ticket.username:'ID '+ticket.user_id)+' · '+esc(ticket.status)+'</small><em>'+esc(ticket.last_message||'')+'</em></span><i>›</i></button>').join(""):'<p class="empty">Обращений в этой категории нет.</p>';
+}
+async function openSupportTicket(id){
+  selectedSupportTicket=String(id);renderSupportQueue();
+  const node=$("support-conversation");node.innerHTML='<p class="empty">Загружаем переписку…</p>';
+  try{
+    const data=await request("/api/support/staff/tickets/"+encodeURIComponent(id));
+    node.innerHTML='<div class="support-conversation-head"><div><b>Обращение #'+esc(data.ticket.id)+' · '+esc(data.ticket.subject)+'</b><small>Пользователь: '+esc(data.ticket.username?'@'+data.ticket.username:data.ticket.user_id)+' · '+esc(data.ticket.status)+' · '+(data.ticket.assigned_to?'Ответственный: '+esc(data.ticket.assigned_to):'Не назначено')+'</small></div><div class="support-head-actions">'+(data.ticket.status!=="closed"?(data.ticket.assigned_to?'':'<button class="button button-quiet" id="support-assign-ticket" type="button">Взять себе</button>')+'<button class="button button-quiet" id="support-close-ticket" type="button">Закрыть</button>':'<span class="status good">Закрыто</span>')+'</div></div><div class="support-conversation-messages">'+data.messages.map(message=>'<article class="support-chat-message '+(message.author_role==="staff"?"staff":"user")+'"><small>'+(message.author_role==="staff"?"Сотрудник #"+esc(message.author_id):"Пользователь")+' · '+esc(date(message.created_at))+'</small><p>'+esc(message.body)+'</p></article>').join("")+'</div>'+(data.ticket.status!=="closed"?'<form id="support-staff-reply"><textarea name="message" maxlength="2000" rows="3" required placeholder="Ответ пользователю…"></textarea><button class="button button-secondary" type="submit">Отправить ответ</button></form>':'<p class="empty">Обращение закрыто.</p>');
+    $("support-assign-ticket")?.addEventListener("click",async()=>{
+      try{await request("/api/support/staff/tickets/"+encodeURIComponent(id)+"/assign",{method:"POST"});toast("Обращение назначено вам.");await openSupportTicket(id);await loadSupportQueue();}
+      catch(error){toast(error.message,"error");}
+    });
+    $("support-staff-reply")?.addEventListener("submit",async event=>{
+      event.preventDefault();const form=event.currentTarget;const message=form.elements.message.value.trim();if(!message)return;
+      const button=form.querySelector("button");button.disabled=true;
+      try{await request("/api/support/staff/tickets/"+encodeURIComponent(id)+"/messages",{method:"POST",body:JSON.stringify({message})});toast("Ответ отправлен пользователю.");await openSupportTicket(id);await loadSupportQueue();}
+      catch(error){toast(error.message,"error");button.disabled=false;}
+    });
+    $("support-close-ticket")?.addEventListener("click",async()=>{
+      try{await request("/api/support/staff/tickets/"+encodeURIComponent(id)+"/close",{method:"POST"});toast("Обращение закрыто.");await loadSupportQueue();await openSupportTicket(id);}
+      catch(error){toast(error.message,"error");}
+    });
+  }catch(error){node.innerHTML='<p class="empty">'+esc(error.message)+'</p>';}
+}
+$("support-queue")?.addEventListener("click",event=>{const button=event.target.closest("[data-support-id]");if(button)openSupportTicket(button.dataset.supportId);});
+$("support-filter")?.addEventListener("change",renderSupportQueue);
+$("support-reload")?.addEventListener("click",loadSupportQueue);
+
 init();
