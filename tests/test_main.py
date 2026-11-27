@@ -18,6 +18,7 @@ from main import (
     POLLING_ADVISORY_LOCK_ID,
     _panel_require_owner,
     panel_people,
+    panel_member_history,
     build_main_keyboard,
     build_section_keyboard,
     build_player_message,
@@ -369,6 +370,49 @@ class PanelRoleAuthorizationTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(web.HTTPForbidden):
                 await panel_people(request)
         require_owner.assert_awaited_once_with(request)
+
+
+    async def test_member_history_requires_owner_before_database_access(self):
+        from unittest.mock import patch
+
+        request = MagicMock()
+        with patch("main._panel_require_owner", new=AsyncMock(side_effect=web.HTTPForbidden())) as require_owner:
+            with patch("main.database._require_pool") as get_pool:
+                with self.assertRaises(web.HTTPForbidden):
+                    await panel_member_history(request)
+        require_owner.assert_awaited_once_with(request)
+        get_pool.assert_not_called()
+
+    async def test_member_history_returns_profile_and_targeted_audit_events(self):
+        from datetime import datetime, timezone
+        from unittest.mock import patch
+
+        created_at = datetime.now(timezone.utc)
+        member = {
+            "chat_id": -1001, "chat_title": "Test group", "user_id": 42,
+            "username": "member", "display_name": "Member", "message_count": 17,
+            "warning_count": 2, "role_title": "Участник", "priority": 0,
+            "first_seen_at": created_at,
+        }
+        event = {"actor_id": 7, "action": "warn", "details": "Правила группы",
+                 "created_at": created_at}
+        pool = MagicMock()
+        pool.fetchrow = AsyncMock(return_value=member)
+        pool.fetch = AsyncMock(return_value=[event])
+        request = MagicMock()
+        request.match_info = {"chat_id": "-1001", "user_id": "42"}
+
+        with patch("main._panel_require_owner", new=AsyncMock(return_value=123)):
+            with patch("main.database.is_chat_registered", new=AsyncMock(return_value=True)):
+                with patch("main.database._require_pool", return_value=pool):
+                    response = await panel_member_history(request)
+
+        payload = __import__("json").loads(response.body)
+        self.assertEqual(payload["member"]["user_id"], 42)
+        self.assertEqual(payload["member"]["warning_count"], 2)
+        self.assertEqual(payload["events"][0]["action"], "warn")
+        self.assertEqual(payload["events"][0]["actor_id"], 7)
+        pool.fetch.assert_awaited_once()
 
 
 
