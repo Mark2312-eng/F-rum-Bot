@@ -50,18 +50,23 @@ async def is_chat_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
 async def is_moderator(message: Message, bot: Bot, owner_id: int) -> bool:
     if not message.from_user:
         return False
-    if message.from_user.id == owner_id:
-        return True
-    try:
-        member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-        if member.status in {"administrator", "creator"}:
-            return True
-    except Exception:
-        pass
-    if await database.get_chat_member_priority(message.chat.id, message.from_user.id) >= 20:
-        return True
-    from system_roles import has_permission
-    return await has_permission(message.from_user.id, owner_id, "moderation")
+    authorized = message.from_user.id == owner_id
+    if not authorized:
+        try:
+            member = await bot.get_chat_member(message.chat.id, message.from_user.id)
+            authorized = member.status in {"administrator", "creator"}
+        except Exception:
+            pass
+    if not authorized:
+        authorized = await database.get_chat_member_priority(message.chat.id, message.from_user.id) >= 20
+    if not authorized:
+        from system_roles import has_permission
+        authorized = await has_permission(message.from_user.id, owner_id, "moderation")
+    if not authorized:
+        return False
+    from chat_roles import command_priority_allowed
+    command_name = (message.text or "").split(maxsplit=1)[0].split("@", 1)[0].lstrip("/!")
+    return await command_priority_allowed(message, owner_id, command_name)
 
 
 async def _can_manage_target(message: Message, bot: Bot, owner_id: int, target_id: int) -> bool:
@@ -358,10 +363,6 @@ async def _moderation_command_allowed(message: Message, bot: Bot, owner_id: int)
         return False
     if not await is_moderator(message, bot, owner_id):
         await message.reply("⛔ Для этой команды нужна роль помощника (20) или выше.")
-        return False
-    from chat_roles import command_priority_allowed
-    raw_command = (message.text or "").split(maxsplit=1)[0].split("@", 1)[0].lstrip("/")
-    if not await command_priority_allowed(message, owner_id, raw_command):
         return False
     return True
 
