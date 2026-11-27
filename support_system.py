@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import os
 import time
+from datetime import datetime, timezone
 from html import escape
 
 from aiogram import F
@@ -15,6 +16,26 @@ from system_roles import has_permission
 
 MAX_MESSAGE = 2000
 STAFF_APPLICATION_ROLES = {"helper", "moderator", "support"}
+
+
+def _parse_interview_time(value: object) -> datetime | None:
+    if not isinstance(value, str) or len(value) > 64:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed <= datetime.now(timezone.utc):
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _valid_interview_score(value: object) -> int | None:
+    try:
+        score = int(value)
+    except (TypeError, ValueError):
+        return None
+    return score if str(value).strip() == str(score) and 1 <= score <= 5 else None
 WAITING_FOR_TICKET: set[int] = set()
 WAITING_FOR_REPLY: dict[int, int] = {}
 
@@ -157,6 +178,21 @@ async def ensure_support_schema() -> None:
         );
         CREATE INDEX IF NOT EXISTS staff_application_events_app_idx
             ON staff_application_events(application_id, created_at DESC, id DESC);
+        CREATE TABLE IF NOT EXISTS staff_application_interviews (
+            id BIGSERIAL PRIMARY KEY,
+            application_id BIGINT NOT NULL REFERENCES staff_applications(id),
+            scheduled_at TIMESTAMPTZ NOT NULL,
+            interviewer_id BIGINT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','completed','cancelled')),
+            score SMALLINT CHECK (score BETWEEN 1 AND 5),
+            feedback TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            completed_at TIMESTAMPTZ
+        );
+        CREATE INDEX IF NOT EXISTS staff_application_interviews_app_idx
+            ON staff_application_interviews(application_id, created_at DESC, id DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS staff_application_interviews_one_scheduled_idx
+            ON staff_application_interviews(application_id) WHERE status='scheduled';
     """)
 
 
@@ -640,14 +676,22 @@ async def staff_application_list(request: web.Request) -> web.Response:
     if user_id is None:
         return _cors(request, web.json_response({"error": "Требуется вход через Telegram."}, status=401))
     rows = await database._require_pool().fetch(
-        """SELECT id,requested_role,status,review_note,created_at,reviewed_at
-           FROM staff_applications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20""",
+        """SELECT a.id,a.requested_role,a.status,a.review_note,a.created_at,a.reviewed_at,
+                  i.scheduled_at AS interview_at,i.status AS interview_status,
+                  i.score AS interview_score,i.feedback AS interview_feedback
+           FROM staff_applications a LEFT JOIN LATERAL (
+             SELECT * FROM staff_application_interviews WHERE application_id=a.id
+             ORDER BY created_at DESC,id DESC LIMIT 1
+           ) i ON TRUE WHERE a.user_id=$1 ORDER BY a.created_at DESC LIMIT 20""",
         user_id,
     )
     return _cors(request, web.json_response({"applications": [{
         "id": row["id"], "requested_role": row["requested_role"], "status": row["status"],
         "review_note": row["review_note"], "created_at": row["created_at"].isoformat(),
         "reviewed_at": row["reviewed_at"].isoformat() if row["reviewed_at"] else None,
+        "interview_at": row["interview_at"].isoformat() if row["interview_at"] else None,
+        "interview_status": row["interview_status"], "interview_score": row["interview_score"],
+        "interview_feedback": row["interview_feedback"],
     } for row in rows]}))
 
 
@@ -658,8 +702,15 @@ async def staff_application_admin_list(request: web.Request) -> web.Response:
         return _cors(request, web.json_response({"error": "Раздел доступен только владельцу бота."}, status=403))
     pool = database._require_pool()
     rows = await pool.fetch(
-        """SELECT id,user_id,username,requested_role,experience,motivation,status,review_note,created_at,reviewed_by,reviewed_at
-           FROM staff_applications ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END,created_at DESC LIMIT 100"""
+        """SELECT a.id,a.user_id,a.username,a.requested_role,a.experience,a.motivation,a.status,
+                  a.review_note,a.created_at,a.reviewed_by,a.reviewed_at,
+                  i.id AS interview_id,i.scheduled_at AS interview_at,i.status AS interview_status,
+                  i.score AS interview_score,i.feedback AS interview_feedback
+           FROM staff_applications a LEFT JOIN LATERAL (
+             SELECT * FROM staff_application_interviews WHERE application_id=a.id
+             ORDER BY created_at DESC,id DESC LIMIT 1
+           ) i ON TRUE
+           ORDER BY CASE WHEN a.status='pending' THEN 0 ELSE 1 END,a.created_at DESC LIMIT 100"""
     )
     events = await pool.fetch(
         """SELECT e.application_id,e.actor_id,e.action,e.details,e.created_at,a.user_id,a.requested_role
@@ -672,6 +723,10 @@ async def staff_application_admin_list(request: web.Request) -> web.Response:
         "motivation": row["motivation"], "status": row["status"], "review_note": row["review_note"],
         "created_at": row["created_at"].isoformat(), "reviewed_by": row["reviewed_by"],
         "reviewed_at": row["reviewed_at"].isoformat() if row["reviewed_at"] else None,
+        "interview_id": row["interview_id"],
+        "interview_at": row["interview_at"].isoformat() if row["interview_at"] else None,
+        "interview_status": row["interview_status"], "interview_score": row["interview_score"],
+        "interview_feedback": row["interview_feedback"],
     } for row in rows], "events": [{
         "application_id": row["application_id"], "user_id": row["user_id"],
         "requested_role": row["requested_role"], "actor_id": row["actor_id"],
@@ -730,6 +785,113 @@ async def staff_application_review(request: web.Request) -> web.Response:
     return _cors(request, web.json_response({"ok": True, "status": action}))
 
 
+async def staff_application_interview_schedule(request: web.Request) -> web.Response:
+    if not _origin_allowed(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
+    reviewer_id = _admin_session(request)
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if reviewer_id is None or owner_id <= 0 or reviewer_id != owner_id:
+        return _cors(request, web.json_response({"error": "Назначать собеседования может только владелец."}, status=403))
+    try:
+        data = await request.json()
+    except (ValueError, web.HTTPBadRequest):
+        raise web.HTTPBadRequest(text="Некорректный запрос.")
+    if not isinstance(data, dict):
+        raise web.HTTPBadRequest(text="Некорректный запрос.")
+    scheduled_at = _parse_interview_time(data.get("scheduled_at"))
+    if scheduled_at is None:
+        raise web.HTTPBadRequest(text="Укажите корректные дату и время в будущем с часовым поясом.")
+    application_id = int(request.match_info["application_id"])
+    pool = database._require_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT user_id,status FROM staff_applications WHERE id=$1 FOR UPDATE", application_id
+            )
+            if not row:
+                return _cors(request, web.json_response({"error": "Заявка не найдена."}, status=404))
+            if row["status"] != "pending":
+                return _cors(request, web.json_response({"error": "Собеседование доступно только для активной заявки."}, status=409))
+            await conn.execute(
+                "UPDATE staff_application_interviews SET status='cancelled' WHERE application_id=$1 AND status='scheduled'",
+                application_id,
+            )
+            interview_id = await conn.fetchval(
+                """INSERT INTO staff_application_interviews(application_id,scheduled_at,interviewer_id)
+                   VALUES($1,$2,$3) RETURNING id""",
+                application_id, scheduled_at, reviewer_id,
+            )
+            await conn.execute(
+                """INSERT INTO staff_application_events(application_id,actor_id,action,details)
+                   VALUES($1,$2,'submitted',$3)""",
+                application_id, reviewer_id, f"Назначено собеседование #{interview_id}: {scheduled_at.isoformat()}",
+            )
+            applicant_id = row["user_id"]
+    try:
+        await request.app["bot"].send_message(
+            applicant_id,
+            f"Для вашей заявки #{application_id} назначено собеседование.\n"
+            f"Дата и время: {scheduled_at.strftime('%d.%m.%Y %H:%M UTC')}\n"
+            "Если время не подходит, обратитесь к владельцу проекта.",
+        )
+    except Exception:
+        pass
+    return _cors(request, web.json_response({"ok": True, "interview_id": interview_id}))
+
+
+async def staff_application_interview_result(request: web.Request) -> web.Response:
+    if not _origin_allowed(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
+    reviewer_id = _admin_session(request)
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if reviewer_id is None or owner_id <= 0 or reviewer_id != owner_id:
+        return _cors(request, web.json_response({"error": "Оценивать собеседования может только владелец."}, status=403))
+    try:
+        data = await request.json()
+    except (ValueError, web.HTTPBadRequest):
+        raise web.HTTPBadRequest(text="Некорректный запрос.")
+    if not isinstance(data, dict):
+        raise web.HTTPBadRequest(text="Некорректный запрос.")
+    score = _valid_interview_score(data.get("score"))
+    feedback = str(data.get("feedback", "")).strip()[:1000]
+    if score is None or not feedback:
+        raise web.HTTPBadRequest(text="Укажите оценку от 1 до 5 и комментарий.")
+    application_id = int(request.match_info["application_id"])
+    pool = database._require_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            interview = await conn.fetchrow(
+                """SELECT i.id,a.user_id FROM staff_application_interviews i
+                   JOIN staff_applications a ON a.id=i.application_id
+                   WHERE i.application_id=$1 AND i.status='scheduled'
+                   ORDER BY i.created_at DESC,i.id DESC LIMIT 1 FOR UPDATE OF i""",
+                application_id,
+            )
+            if not interview:
+                return _cors(request, web.json_response({"error": "Активное собеседование не найдено."}, status=404))
+            await conn.execute(
+                """UPDATE staff_application_interviews
+                   SET status='completed',score=$2,feedback=$3,completed_at=NOW()
+                   WHERE id=$1""", interview["id"], score, feedback,
+            )
+            await conn.execute(
+                """INSERT INTO staff_application_events(application_id,actor_id,action,details)
+                   VALUES($1,$2,'submitted',$3)""",
+                application_id, reviewer_id, f"Собеседование завершено: оценка {score}/5. {feedback}",
+            )
+            applicant_id = interview["user_id"]
+    try:
+        await request.app["bot"].send_message(
+            applicant_id,
+            f"Собеседование по заявке #{application_id} завершено.\n"
+            f"Оценка: {score}/5.\nКомментарий: {feedback}\n"
+            "Итоговое решение по заявке будет сообщено отдельно.",
+        )
+    except Exception:
+        pass
+    return _cors(request, web.json_response({"ok": True, "score": score}))
+
+
 def register_support_routes(app: web.Application) -> None:
     app.router.add_route("OPTIONS", "/api/support/{tail:.*}", support_options)
     app.router.add_post("/api/support/auth/telegram", support_login)
@@ -740,6 +902,8 @@ def register_support_routes(app: web.Application) -> None:
     app.router.add_get("/api/support/applications", staff_application_list)
     app.router.add_get("/api/support/staff/applications", staff_application_admin_list)
     app.router.add_post("/api/support/staff/applications/{application_id:[0-9]+}/review", staff_application_review)
+    app.router.add_post("/api/support/staff/applications/{application_id:[0-9]+}/interview", staff_application_interview_schedule)
+    app.router.add_post("/api/support/staff/applications/{application_id:[0-9]+}/interview/result", staff_application_interview_result)
     app.router.add_post("/api/support/tickets", support_create)
     app.router.add_get("/api/support/tickets/{ticket_id:[0-9]+}", support_thread)
     app.router.add_post("/api/support/tickets/{ticket_id:[0-9]+}/messages", support_reply)
