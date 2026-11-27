@@ -17,7 +17,6 @@
       <a class="brand" href="https://f-rum-bot-info.onrender.com" aria-label="F-rum-Bot — главная"><span class="brand-mark">F</span><span>F-rum<span class="brand-accent">-Bot</span></span></a>
       <span class="private"><span class="status-dot"></span> PRIVATE CONTROL</span>
     </header>
-
     <section id="login-view" class="login">
       <div class="login-copy">
         <div class="eyebrow">ЗАКРЫТЫЙ ДОСТУП <span> / 01</span></div>
@@ -30,8 +29,7 @@
         </div>
       </div>
       <div class="auth-card">
-        <div class="auth-icon">↗</div>
-        <h2>Вход в систему</h2>
+        <div class="auth-icon">↗</div><h2>Вход в систему</h2>
         <p>Подтвердите личность в Telegram, чтобы открыть панель.</p>
         <div id="login-widget" class="widget-slot" aria-live="polite"><p class="notice"><span class="spinner"></span> Подготавливаем безопасный вход…</p></div>
         <p id="message" class="message" role="status" aria-live="polite"></p>
@@ -39,22 +37,17 @@
       </div>
       <a class="back" href="https://f-rum-bot-info.onrender.com">← На сайт проекта</a>
     </section>
-
     <section id="dashboard" class="dashboard" hidden>
       <div class="dash-head">
         <div><div class="eyebrow">ЦЕНТР УПРАВЛЕНИЯ <span>/ OVERVIEW</span></div><h1>Обзор системы</h1><p class="dash-subtitle">Состояние модерации, групп и проверочных тестов.</p></div>
-        <div class="dash-actions"><span class="live-label"><span class="status-dot"></span> СЕССИЯ АКТИВНА</span><button id="refresh" class="button button-secondary" type="button">↻ Обновить</button><button id="logout" class="button button-quiet" type="button">Выйти</button></div>
+        <div class="dash-actions"><span class="live-label"><span class="status-dot"></span> СЕССИЯ АКТИВНА</span><button id="refresh" class="button button-secondary" type="button">↻ Обновить</button><button id="export-csv" class="button button-quiet" type="button">↓ Экспорт CSV</button><button id="logout" class="button button-quiet" type="button">Выйти</button></div>
       </div>
-
       <nav class="dash-nav" aria-label="Разделы панели">
         <a class="active" href="#overview">Обзор</a><a href="#reports">Жалобы</a><a href="#members">Участники</a><a href="#audit">Журнал</a><a href="#groups">Группы</a><a href="#tests">Тесты</a><a href="#results">Результаты</a>
       </nav>
-
       <div id="overview" class="section-label"><span>01 / СВОДКА</span><span id="updated-at">Загрузка данных…</span></div>
       <div id="stats" class="stats" aria-live="polite"></div>
-
-      <div class="toolbar"><div><div class="section-label"><span>02 / МОНИТОРИНГ</span></div><p>Быстрый поиск по загруженным данным</p></div><label class="search-box"><span>⌕</span><input id="table-search" type="search" placeholder="Поиск по панели…" autocomplete="off" aria-label="Поиск по таблицам"></label></div>
-
+      <div class="toolbar"><div><div class="section-label"><span>02 / МОНИТОРИНГ</span></div><p>Поиск по таблицам · автоматическое обновление раз в минуту · «/» — поиск</p></div><label class="search-box"><span>⌕</span><input id="table-search" type="search" placeholder="Поиск по панели…" autocomplete="off" aria-label="Поиск по таблицам"></label></div>
       <section id="groups" class="block"><div class="block-head"><div><span class="section-index">02.1</span><h2>Подключённые группы</h2><p>Чаты, в которых работает бот</p></div><span id="groups-count" class="count">—</span></div><div id="chats"></div></section>
       <section id="tests" class="block"><div class="block-head"><div><span class="section-index">02.2</span><h2>Тесты</h2><p>Настроенные проверки и назначение ролей</p></div><span id="tests-count" class="count">—</span></div><div id="tests-table"></div></section>
       <section id="results" class="block"><div class="block-head"><div><span class="section-index">02.3</span><h2>Последние результаты</h2><p>Недавние попытки участников</p></div><span id="results-count" class="count">—</span></div><div id="results-table"></div></section>
@@ -63,6 +56,7 @@
       <section id="audit" class="block"><div class="block-head"><div><span class="section-index">03.3</span><h2>Журнал модерации</h2><p>Последние действия бота и модераторов</p></div><span id="events-count" class="count">—</span></div><div id="events-table"></div></section>
       <p id="dashboard-error" class="message" role="status" aria-live="polite"></p>
     </section>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <footer><span>F-RUM-BOT</span><span>ДОСТУП ОГРАНИЧЕН · СЕССИЯ 60 МИНУТ</span></footer>
   </main>
   <script src="app.js"></script>
