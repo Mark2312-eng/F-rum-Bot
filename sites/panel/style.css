@@ -95,3 +95,34 @@ tbody tr:hover{background:#18251d}
 .toast[data-type="error"]{border-color:#79453f;background:#2a1918;color:#ffd0c9}
 @keyframes toast-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 @media(max-width:760px){.toast{right:14px;bottom:14px}}
+
+
+/* Unified support ticket queue */
+.support-panel-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:4px 0 14px;color:var(--muted);font-size:11px}
+.support-panel-toolbar label{display:flex;align-items:center;gap:9px}
+.support-panel-toolbar select{border:1px solid var(--line);border-radius:7px;background:#101916;color:var(--text);padding:8px 10px;font:11px Manrope}
+.support-panel-grid{display:grid;grid-template-columns:minmax(230px,.72fr) minmax(0,1.28fr);gap:14px;min-height:250px}
+.support-queue{display:grid;align-content:start;gap:7px;max-height:520px;overflow:auto}
+.support-queue-item{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:11px;text-align:left;border:1px solid #29382f;border-radius:8px;background:#0e1713;color:var(--text);cursor:pointer}
+.support-queue-item:hover,.support-queue-item.active{border-color:#789e5d;background:#1a291e}
+.support-queue-item b,.support-queue-item small,.support-queue-item em{display:block}
+.support-queue-item b{font-size:11px;line-height:1.5}
+.support-queue-item small{margin-top:5px;color:#9baa9f;font-size:10px}
+.support-queue-item em{margin-top:5px;color:#75857a;font-size:10px;font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:250px}
+.support-queue-item i{color:var(--green);font-size:19px;font-style:normal}
+.support-conversation{min-width:0;border:1px solid #29382f;border-radius:9px;padding:14px;background:#0d1511}
+.support-conversation-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding-bottom:12px;border-bottom:1px solid #26352d}
+.support-conversation-head b,.support-conversation-head small{display:block}
+.support-conversation-head b{font-size:12px;line-height:1.6}
+.support-conversation-head small{margin-top:5px;color:#91a097;font-size:10px}
+.support-conversation-messages{display:grid;gap:9px;max-height:370px;overflow:auto;padding:13px 2px}
+.support-chat-message{max-width:90%;padding:10px 12px;border:1px solid #2d3c32;border-radius:8px;background:#17221b}
+.support-chat-message.user{justify-self:start}
+.support-chat-message.staff{justify-self:end;background:#1a2b20;border-color:#48613e}
+.support-chat-message small{color:var(--green);font-size:9px}
+.support-chat-message p{margin:6px 0 0;color:#dce5df;font-size:11px;line-height:1.65;white-space:pre-wrap;overflow-wrap:anywhere}
+#support-staff-reply{display:grid;gap:9px}
+#support-staff-reply textarea{width:100%;resize:vertical;border:1px solid #34463a;border-radius:8px;background:#101a14;color:var(--text);padding:11px;font:12px Manrope}
+#support-staff-reply textarea:focus{outline:2px solid #789e5d;outline-offset:1px}
+#support-staff-reply button{justify-self:start}
+@media(max-width:760px){.support-panel-grid{grid-template-columns:1fr}.support-queue{max-height:260px}.support-conversation{min-height:230px}}
