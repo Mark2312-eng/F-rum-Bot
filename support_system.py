@@ -15,6 +15,7 @@ from system_roles import has_permission
 
 MAX_MESSAGE = 2000
 WAITING_FOR_TICKET: set[int] = set()
+WAITING_FOR_REPLY: dict[int, int] = {}
 
 
 def _secret() -> bytes:
@@ -204,6 +205,12 @@ async def support_create(request: web.Request) -> web.Response:
     if not subject or not body:
         raise web.HTTPBadRequest(text="Укажите тему и сообщение.")
     pool = database._require_pool()
+    recent = await pool.fetchval(
+        "SELECT COUNT(*) FROM support_tickets WHERE user_id=$1 AND created_at >= NOW() - INTERVAL '1 hour'",
+        user_id,
+    )
+    if int(recent or 0) >= 5:
+        return _cors(request, web.json_response({"error": "Лимит новых обращений: не более 5 в час."}, status=429))
     async with pool.acquire() as conn:
         async with conn.transaction():
             ticket_id = await conn.fetchval(
@@ -326,6 +333,20 @@ async def staff_ticket_reply(request: web.Request) -> web.Response:
     return _cors(request, web.json_response({"ok": True}))
 
 
+async def staff_ticket_assign(request: web.Request) -> web.Response:
+    user_id = _admin_session(request)
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if user_id is None or not await has_permission(user_id, owner_id, "support"):
+        return _cors(request, web.json_response({"error": "Недостаточно прав."}, status=403))
+    ticket_id = int(request.match_info["ticket_id"])
+    row = await database._require_pool().fetchrow(
+        "UPDATE support_tickets SET assigned_to=$2,updated_at=NOW() WHERE id=$1 AND status<>'closed' RETURNING id",
+        ticket_id, user_id)
+    if not row:
+        return _cors(request, web.json_response({"error": "Обращение не найдено или закрыто."}, status=404))
+    return _cors(request, web.json_response({"ok": True, "assigned_to": user_id}))
+
+
 async def staff_ticket_close(request: web.Request) -> web.Response:
     user_id = _admin_session(request)
     owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
@@ -384,20 +405,69 @@ async def support_callback(callback: CallbackQuery) -> None:
             await callback.message.answer("У вас пока нет обращений.")
         else:
             labels = {"open": "Открыто", "waiting_user": "Ожидает вас", "waiting_support": "Ожидает поддержки", "closed": "Закрыто"}
-            await callback.message.answer("\n".join(f"#{r['id']} · {escape(r['subject'])} · {labels.get(r['status'], r['status'])}" for r in rows), parse_mode="HTML")
+            text = "\\n".join(f"#{r['id']} · {escape(r['subject'])} · {labels.get(r['status'], r['status'])}" for r in rows)
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"Ответить на #{r['id']}", callback_data=f"support:reply:{r['id']}")]
+                for r in rows if r["status"] != "closed"
+            ])
+            await callback.message.answer(text + "\\n\\nВыберите обращение, чтобы ответить:", reply_markup=keyboard, parse_mode="HTML")
         await callback.answer()
+    elif callback.data and callback.data.startswith("support:reply:"):
+        raw_id = callback.data.rsplit(":", 1)[-1]
+        if not raw_id.isdigit():
+            await callback.answer("Некорректный номер обращения.", show_alert=True)
+            return
+        ticket_id = int(raw_id)
+        ticket = await database._require_pool().fetchrow(
+            "SELECT status FROM support_tickets WHERE id=$1 AND user_id=$2", ticket_id, user_id)
+        if not ticket or ticket["status"] == "closed":
+            await callback.answer("Обращение закрыто или не найдено.", show_alert=True)
+            return
+        WAITING_FOR_REPLY[user_id] = ticket_id
+        await callback.message.answer(f"Напишите ответ для обращения #{ticket_id} одним сообщением.")
+        await callback.answer("Ожидаю ответ")
 
 
 async def support_private_message(message: Message) -> None:
     if not message.from_user or message.chat.type != "private" or not message.text:
         return
     user_id = message.from_user.id
+    body = message.text.strip()[:MAX_MESSAGE]
+    if user_id in WAITING_FOR_REPLY:
+        ticket_id = WAITING_FOR_REPLY.pop(user_id)
+        pool = database._require_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                ticket = await conn.fetchrow(
+                    "SELECT status FROM support_tickets WHERE id=$1 AND user_id=$2 FOR UPDATE",
+                    ticket_id, user_id)
+                if not ticket or ticket["status"] == "closed":
+                    await message.answer("Обращение закрыто или не найдено. Откройте /support.")
+                    return
+                recent = await conn.fetchval(
+                    "SELECT COUNT(*) FROM support_messages WHERE ticket_id=$1 AND author_id=$2 AND created_at >= NOW() - INTERVAL '1 minute'",
+                    ticket_id, user_id)
+                if int(recent or 0) >= 8:
+                    await message.answer("Слишком много сообщений за короткое время. Попробуйте позже.")
+                    return
+                await conn.execute(
+                    "INSERT INTO support_messages(ticket_id,author_id,author_role,body) VALUES($1,$2,'user',$3)",
+                    ticket_id, user_id, body)
+                await conn.execute("UPDATE support_tickets SET status='waiting_support',updated_at=NOW() WHERE id=$1", ticket_id)
+        await message.answer(f"Ответ добавлен в обращение #{ticket_id}.")
+        await _notify_support_staff(message.bot, ticket_id, user_id, "Ответ пользователя", body)
+        return
     if user_id not in WAITING_FOR_TICKET:
         return
     WAITING_FOR_TICKET.discard(user_id)
-    body = message.text.strip()[:MAX_MESSAGE]
     if len(body) < 5:
         await message.answer("Сообщение слишком короткое. Нажмите /support и попробуйте ещё раз.")
+        return
+    recent = await database._require_pool().fetchval(
+        "SELECT COUNT(*) FROM support_tickets WHERE user_id=$1 AND created_at >= NOW() - INTERVAL '1 hour'",
+        user_id)
+    if int(recent or 0) >= 5:
+        await message.answer("Достигнут лимит новых обращений: не более 5 в час.")
         return
     pool = database._require_pool()
     async with pool.acquire() as conn:
@@ -482,6 +552,7 @@ def register_support_routes(app: web.Application) -> None:
     app.router.add_post("/api/support/tickets/{ticket_id:[0-9]+}/messages", support_reply)
     app.router.add_get("/api/support/staff/tickets", staff_ticket_queue)
     app.router.add_get("/api/support/staff/tickets/{ticket_id:[0-9]+}", staff_ticket_thread)
+    app.router.add_post("/api/support/staff/tickets/{ticket_id:[0-9]+}/assign", staff_ticket_assign)
     app.router.add_post("/api/support/staff/tickets/{ticket_id:[0-9]+}/messages", staff_ticket_reply)
     app.router.add_post("/api/support/staff/tickets/{ticket_id:[0-9]+}/close", staff_ticket_close)
 
