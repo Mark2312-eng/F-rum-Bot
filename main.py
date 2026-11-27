@@ -560,6 +560,173 @@ async def panel_close_report(request: web.Request) -> web.Response:
     return _panel_cors(request, web.json_response({"ok": True, "report_id": report_id}))
 
 
+def _panel_json_body(data: object) -> dict:
+    if not isinstance(data, dict):
+        raise web.HTTPBadRequest(text="Ожидается JSON-объект.")
+    return data
+
+
+async def _panel_require_owner(request: web.Request) -> int:
+    if not _panel_origin(request) or request.headers.get("Origin", "") != _panel_origin(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
+    user_id = _panel_user(request)
+    if user_id is None:
+        raise web.HTTPUnauthorized(text="Требуется авторизация.")
+    owner_id = os.getenv("OWNER_TELEGRAM_ID", "").strip()
+    if not owner_id.isdigit() or user_id != int(owner_id):
+        raise web.HTTPForbidden(text="Управление ролями доступно только владельцу бота.")
+    return user_id
+
+
+async def panel_people(request: web.Request) -> web.Response:
+    """List members and role definitions for the owner-only people workspace."""
+    user_id = _panel_user(request)
+    if user_id is None:
+        return _panel_cors(request, web.json_response({"error": "Требуется авторизация."}, status=401))
+    pool = database._require_pool()
+    chat_id_raw = request.query.get("chat_id", "").strip()
+    chats = await pool.fetch(
+        "SELECT chat_id, title FROM registered_chats ORDER BY title"
+    )
+    selected_chat_id = None
+    if chat_id_raw:
+        try:
+            selected_chat_id = int(chat_id_raw)
+        except ValueError:
+            return _panel_cors(request, web.json_response({"error": "Некорректный ID группы."}, status=400))
+        if not await database.is_chat_registered(selected_chat_id):
+            return _panel_cors(request, web.json_response({"error": "Группа не найдена."}, status=404))
+    query = request.query.get("q", "").strip()[:80]
+    if selected_chat_id is None:
+        members = await pool.fetch(
+            """SELECT a.chat_id, COALESCE(c.title, '') AS chat_title, a.user_id,
+                      a.username, a.display_name, a.message_count, a.first_seen_at,
+                      COALESCE(w.warning_count, 0) AS warning_count,
+                      COALESCE(r.title, 'Участник') AS role_title,
+                      COALESCE(r.role_key, '') AS role_key,
+                      COALESCE(r.priority, 0) AS priority
+               FROM chat_member_activity a
+               LEFT JOIN registered_chats c ON c.chat_id = a.chat_id
+               LEFT JOIN moderation_warnings w ON w.chat_id = a.chat_id AND w.user_id = a.user_id
+               LEFT JOIN chat_member_roles mr ON mr.chat_id = a.chat_id AND mr.user_id = a.user_id
+               LEFT JOIN chat_role_definitions r ON r.chat_id = mr.chat_id AND r.role_key = mr.role_key
+               WHERE ($1 = '' OR a.username ILIKE '%' || $1 || '%'
+                      OR a.display_name ILIKE '%' || $1 || '%'
+                      OR a.user_id::text = $1)
+               ORDER BY a.message_count DESC, a.first_seen_at DESC LIMIT 250""",
+            query,
+        )
+        roles = []
+    else:
+        members = await pool.fetch(
+            """SELECT a.chat_id, COALESCE(c.title, '') AS chat_title, a.user_id,
+                      a.username, a.display_name, a.message_count, a.first_seen_at,
+                      COALESCE(w.warning_count, 0) AS warning_count,
+                      COALESCE(r.title, 'Участник') AS role_title,
+                      COALESCE(r.role_key, '') AS role_key,
+                      COALESCE(r.priority, 0) AS priority
+               FROM chat_member_activity a
+               LEFT JOIN registered_chats c ON c.chat_id = a.chat_id
+               LEFT JOIN moderation_warnings w ON w.chat_id = a.chat_id AND w.user_id = a.user_id
+               LEFT JOIN chat_member_roles mr ON mr.chat_id = a.chat_id AND mr.user_id = a.user_id
+               LEFT JOIN chat_role_definitions r ON r.chat_id = mr.chat_id AND r.role_key = mr.role_key
+               WHERE a.chat_id = $1 AND ($2 = '' OR a.username ILIKE '%' || $2 || '%'
+                      OR a.display_name ILIKE '%' || $2 || '%'
+                      OR a.user_id::text = $2)
+               ORDER BY a.message_count DESC, a.first_seen_at DESC LIMIT 250""",
+            selected_chat_id, query,
+        )
+        roles = await database.get_chat_role_definitions(selected_chat_id)
+    payload = {
+        "selected_chat_id": selected_chat_id,
+        "chats": [{"chat_id": row["chat_id"], "title": row["title"]} for row in chats],
+        "roles": [{"role_key": row["role_key"], "title": row["title"],
+                   "priority": row["priority"], "is_system": row["is_system"]} for row in roles],
+        "members": [{
+            "chat_id": row["chat_id"], "chat_title": row["chat_title"],
+            "user_id": row["user_id"], "username": row["username"],
+            "display_name": row["display_name"], "message_count": row["message_count"],
+            "warning_count": row["warning_count"], "role_title": row["role_title"],
+            "role_key": row["role_key"], "priority": row["priority"],
+            "first_seen_at": row["first_seen_at"].isoformat(),
+        } for row in members],
+    }
+    return _panel_cors(request, web.json_response(payload))
+
+
+async def panel_assign_member_role(request: web.Request) -> web.Response:
+    actor_id = await _panel_require_owner(request)
+    try:
+        data = _panel_json_body(await request.json())
+        chat_id = int(data.get("chat_id", 0))
+        target_id = int(data.get("user_id", 0))
+        role_key = str(data.get("role_key", "")).strip()
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Проверьте ID группы, участника и ключ роли.")
+    if chat_id == 0 or target_id <= 0 or not role_key or len(role_key) > 40:
+        raise web.HTTPBadRequest(text="Проверьте ID группы, участника и ключ роли.")
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if target_id in {actor_id, owner_id}:
+        raise web.HTTPForbidden(text="Нельзя менять роль владельца или назначать роль самому себе.")
+    if not await database.is_chat_registered(chat_id):
+        raise web.HTTPNotFound(text="Группа не найдена.")
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        raise web.HTTPServiceUnavailable(text="Telegram Bot API не настроен.")
+    telegram_bot = Bot(token=token)
+    try:
+        try:
+            member = await telegram_bot.get_chat_member(chat_id, target_id)
+        except Exception:
+            return _panel_cors(request, web.json_response(
+                {"error": "Не удалось подтвердить, что пользователь состоит в этой группе."}, status=422
+            ))
+        if member.status in {"creator", "administrator"} or (
+            member.status == "restricted" and not getattr(member, "is_member", False)
+        ):
+            return _panel_cors(request, web.json_response(
+                {"error": "Роли панели нельзя назначать владельцам и администраторам Telegram."}, status=409
+            ))
+        if member.status in {"left", "kicked"}:
+            return _panel_cors(request, web.json_response(
+                {"error": "Пользователь больше не состоит в группе."}, status=409
+            ))
+    finally:
+        await telegram_bot.session.close()
+    assigned = await database.assign_chat_role_guarded(
+        chat_id, target_id, role_key, actor_id, 100
+    )
+    if not assigned:
+        return _panel_cors(request, web.json_response(
+            {"error": "Назначение отклонено: проверьте роль, иммунитет и текущий приоритет участника."},
+            status=409,
+        ))
+    return _panel_cors(request, web.json_response({"ok": True, "user_id": target_id, "role_key": role_key}))
+
+
+async def panel_remove_member_role(request: web.Request) -> web.Response:
+    actor_id = await _panel_require_owner(request)
+    try:
+        data = _panel_json_body(await request.json())
+        chat_id = int(data.get("chat_id", 0))
+        target_id = int(data.get("user_id", 0))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Проверьте ID группы и участника.")
+    if chat_id == 0 or target_id <= 0:
+        raise web.HTTPBadRequest(text="Проверьте ID группы и участника.")
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if target_id in {actor_id, owner_id}:
+        raise web.HTTPForbidden(text="Нельзя снимать роль владельца или собственную роль.")
+    if not await database.is_chat_registered(chat_id):
+        raise web.HTTPNotFound(text="Группа не найдена.")
+    removed = await database.remove_chat_role_guarded(chat_id, target_id, actor_id, 100)
+    if not removed:
+        return _panel_cors(request, web.json_response(
+            {"error": "Роль отсутствует или её приоритет нельзя изменить."}, status=409
+        ))
+    return _panel_cors(request, web.json_response({"ok": True, "user_id": target_id}))
+
+
 async def start_web_server(port: int, bot: Bot) -> web.AppRunner:
     """Start health-check and authenticated admin-panel API endpoints."""
     app = web.Application(middlewares=[panel_cors_middleware])
@@ -573,6 +740,9 @@ async def start_web_server(port: int, bot: Bot) -> web.AppRunner:
     app.router.add_post("/api/logout", panel_logout)
     app.router.add_get("/api/dashboard", panel_dashboard)
     app.router.add_get("/api/moderation", panel_moderation)
+    app.router.add_get("/api/people", panel_people)
+    app.router.add_post("/api/members/role", panel_assign_member_role)
+    app.router.add_post("/api/members/role/remove", panel_remove_member_role)
     app.router.add_post("/api/reports/{report_id:[0-9]+}/close", panel_close_report)
     register_support_routes(app)
     runner = web.AppRunner(app, access_log=LOGGER)
