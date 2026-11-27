@@ -69,6 +69,10 @@ async def reports_command(message: Message, bot: Bot, owner_id: int) -> None:
 async def reportclose_command(message: Message, bot: Bot, owner_id: int) -> None:
     if not await _allowed(message, bot, owner_id):
         return
+    from moderation import is_moderator
+    if not await is_moderator(message, bot, owner_id):
+        await message.reply("⛔ Закрывать жалобы могут модераторы и руководство.")
+        return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit():
         await message.reply("Формат: /reportclose ID_ЖАЛОБЫ.")
