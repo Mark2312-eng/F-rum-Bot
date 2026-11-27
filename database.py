@@ -121,6 +121,7 @@ class Database:
                     display_name TEXT NOT NULL DEFAULT '',
                     message_count BIGINT NOT NULL DEFAULT 0 CHECK (message_count >= 0),
                     first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    join_event_seen BOOLEAN NOT NULL DEFAULT FALSE,
                     invited_by BIGINT,
                     PRIMARY KEY (chat_id, user_id)
                 );
@@ -443,12 +444,13 @@ class Database:
         pool = self._require_pool()
         await pool.execute(
             """INSERT INTO chat_member_activity
-                   (chat_id, user_id, username, display_name, first_seen_at, invited_by)
-               SELECT $1, $2, $3, $4, $5, $6
+                   (chat_id, user_id, username, display_name, first_seen_at, join_event_seen, invited_by)
+               SELECT $1, $2, $3, $4, $5, TRUE, $6
                WHERE EXISTS (SELECT 1 FROM registered_chats WHERE chat_id = $1)
                ON CONFLICT (chat_id, user_id) DO UPDATE
                SET username = EXCLUDED.username,
                    display_name = EXCLUDED.display_name,
+                   join_event_seen = TRUE,
                    invited_by = COALESCE(chat_member_activity.invited_by, EXCLUDED.invited_by)""",
             chat_id, user_id, username, display_name[:160], joined_at, invited_by,
         )
@@ -460,7 +462,7 @@ class Database:
                    SELECT user_id, RANK() OVER (ORDER BY message_count DESC) AS activity_rank
                    FROM chat_member_activity WHERE chat_id = $1
                )
-               SELECT a.message_count, a.first_seen_at, a.invited_by,
+               SELECT a.message_count, a.first_seen_at, a.join_event_seen, a.invited_by,
                       COALESCE(d.message_count, 0) AS today_count,
                       COALESCE(w.warning_count, 0) AS warning_count,
                       n.nickname, r.activity_rank
