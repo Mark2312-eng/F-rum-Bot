@@ -161,7 +161,10 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
         try:
             await message.delete()
             await bot.ban_chat_member(message.chat.id, message.from_user.id)
-            await database.log_moderation_event(message.chat.id, None, message.from_user.id, "global_blacklist_ban")
+            await database.log_moderation_event(
+                message.chat.id, None, message.from_user.id, "global_blacklist_ban",
+                "Автоматически: пользователь находится в глобальном чёрном списке"
+            )
         except Exception:
             return
         return
@@ -183,7 +186,8 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
                     until_date=int(time.time()) + 300,
                 )
                 await database.log_moderation_event(
-                    message.chat.id, None, message.from_user.id, "link_mute", "5 минут"
+                    message.chat.id, None, message.from_user.id, "link_mute",
+                    "5 минут; автоматически по политике ссылок группы"
                 )
                 await message.answer(
                     f"🔇 {message.from_user.mention_html()}, отправка ссылок запрещена. Ограничение на 5 минут.",
@@ -191,7 +195,8 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
                 )
             else:
                 await database.log_moderation_event(
-                    message.chat.id, None, message.from_user.id, "link_deleted"
+                    message.chat.id, None, message.from_user.id, "link_deleted",
+                    "Автоматически: ссылки запрещены настройками группы"
                 )
                 await message.answer(
                     f"⚠️ {message.from_user.mention_html()}, ссылки в этой группе разрешены только администраторам.",
@@ -217,7 +222,8 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
         try:
             await message.delete()
             await database.log_moderation_event(
-                message.chat.id, None, message.from_user.id, "flood_delete"
+                message.chat.id, None, message.from_user.id, "flood_delete",
+                f"Автоматически: превышен лимит {flood_limit} сообщений за {FLOOD_WINDOW_SECONDS} секунд"
             )
             if should_notify_flood(key, now):
                 await message.answer(
@@ -266,9 +272,11 @@ async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
         return
     if not await _can_manage_target(message, bot, owner_id, target.id):
         return
+    reason = parse_moderation_reason(message)
     count = await database.add_warning(message.chat.id, target.id)
     await database.log_moderation_event(
-        message.chat.id, message.from_user.id, target.id, "warning", f"{count}/{WARNING_LIMIT}"
+        message.chat.id, message.from_user.id, target.id, "warning",
+        f"{count}/{WARNING_LIMIT}; Причина: {reason}"
     )
     if count >= WARNING_LIMIT:
         try:
@@ -280,7 +288,8 @@ async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
             )
             await database.reset_warnings(message.chat.id, target.id)
             await database.log_moderation_event(
-                message.chat.id, message.from_user.id, target.id, "auto_mute", "5 минут после 3 предупреждений"
+                message.chat.id, message.from_user.id, target.id, "auto_mute",
+                f"5 минут после 3 предупреждений; причина последнего предупреждения: {reason}"
             )
             await message.answer(
                 f"🔇 {target.mention_html()} получил {WARNING_LIMIT} предупреждения и ограничен на 5 минут.",
@@ -304,6 +313,26 @@ MUTE_DURATIONS = {
     "1d": (86400, "1 день"),
     "7d": (604800, "7 дней"),
 }
+
+
+def parse_moderation_reason(
+    message: Message,
+    *,
+    target_argument: bool = True,
+    duration_argument: bool = False,
+    count_argument: bool = False,
+) -> str:
+    """Extract an optional reason without mixing it with target, duration, or count."""
+    parts = (message.text or "").strip().split()
+    arguments = parts[1:] if parts else []
+    if target_argument and not message.reply_to_message and arguments:
+        arguments = arguments[1:]
+    if count_argument and arguments and arguments[0].isdigit():
+        arguments = arguments[1:]
+    if duration_argument and arguments and arguments[0].lower() in MUTE_DURATIONS:
+        arguments = arguments[1:]
+    reason = " ".join(arguments).strip()
+    return reason[:200] if reason else "Причина не указана"
 
 
 def parse_mute_duration(message: Message) -> tuple[int, str] | None:
@@ -339,6 +368,7 @@ async def mute_member(message: Message, bot: Bot, owner_id: int) -> None:
         await message.reply("Срок: 5m, 10m, 30m, 1h, 12h, 1d или 7d. Пример: /mute 123456 30m.")
         return
     duration_seconds, duration_label = parsed_duration
+    reason = parse_moderation_reason(message, duration_argument=True)
     try:
         await bot.restrict_chat_member(
             message.chat.id,
@@ -347,7 +377,8 @@ async def mute_member(message: Message, bot: Bot, owner_id: int) -> None:
             until_date=int(time.time()) + duration_seconds,
         )
         await database.log_moderation_event(
-            message.chat.id, message.from_user.id, target.id, "manual_mute", duration_label
+            message.chat.id, message.from_user.id, target.id, "manual_mute",
+            f"{duration_label}; Причина: {reason}"
         )
         await message.answer(f"🔇 {target.mention_html()} ограничен на {duration_label}.", parse_mode="HTML")
     except Exception:
@@ -369,6 +400,7 @@ async def unmute_member(message: Message, bot: Bot, owner_id: int) -> None:
         return
     if not await _can_manage_target(message, bot, owner_id, target.id):
         return
+    reason = parse_moderation_reason(message)
     try:
         await bot.restrict_chat_member(
             message.chat.id,
@@ -387,7 +419,7 @@ async def unmute_member(message: Message, bot: Bot, owner_id: int) -> None:
             ),
         )
         await database.log_moderation_event(
-            message.chat.id, message.from_user.id, target.id, "unmute"
+            message.chat.id, message.from_user.id, target.id, "unmute", f"Причина: {reason}"
         )
         await message.answer(f"🔊 Ограничение снято с {target.mention_html()}.", parse_mode="HTML")
     except Exception:
@@ -419,9 +451,12 @@ async def ban_member(message: Message, bot: Bot, owner_id: int) -> None:
     if await is_chat_admin(bot, message.chat.id, target.id):
         await message.reply("Нельзя заблокировать администратора группы.")
         return
+    reason = parse_moderation_reason(message)
     try:
         await bot.ban_chat_member(message.chat.id, target.id)
-        await database.log_moderation_event(message.chat.id, message.from_user.id, target.id, "ban")
+        await database.log_moderation_event(
+            message.chat.id, message.from_user.id, target.id, "ban", f"Причина: {reason}"
+        )
         await message.answer(f"⛔ {target.mention_html()} заблокирован в группе.", parse_mode="HTML")
     except Exception:
         await message.reply("Не удалось заблокировать участника. Проверьте права бота.")
@@ -436,9 +471,12 @@ async def unban_member(message: Message, bot: Bot, owner_id: int) -> None:
         return
     if not await _can_manage_target(message, bot, owner_id, target.id):
         return
+    reason = parse_moderation_reason(message)
     try:
         await bot.unban_chat_member(message.chat.id, target.id, only_if_banned=True)
-        await database.log_moderation_event(message.chat.id, message.from_user.id, target.id, "unban")
+        await database.log_moderation_event(
+            message.chat.id, message.from_user.id, target.id, "unban", f"Причина: {reason}"
+        )
         await message.answer(f"✅ Блокировка снята с пользователя <code>{target.id}</code>.", parse_mode="HTML")
     except Exception:
         await message.reply("Не удалось снять блокировку. Проверьте ID и права бота.")
@@ -456,10 +494,13 @@ async def kick_member(message: Message, bot: Bot, owner_id: int) -> None:
     if await is_chat_admin(bot, message.chat.id, target.id):
         await message.reply("Нельзя исключить администратора группы.")
         return
+    reason = parse_moderation_reason(message)
     try:
         await bot.ban_chat_member(message.chat.id, target.id, revoke_messages=False)
         await bot.unban_chat_member(message.chat.id, target.id, only_if_banned=True)
-        await database.log_moderation_event(message.chat.id, message.from_user.id, target.id, "kick")
+        await database.log_moderation_event(
+            message.chat.id, message.from_user.id, target.id, "kick", f"Причина: {reason}"
+        )
         await message.answer(f"👢 {target.mention_html()} исключён из группы. Он сможет вступить снова по ссылке.", parse_mode="HTML")
     except Exception:
         await message.reply("Не удалось исключить участника. Проверьте права бота.")
@@ -480,8 +521,10 @@ async def purge_messages(message: Message, bot: Bot, owner_id: int) -> None:
     message_ids = list(range(first_id, message.message_id + 1))
     try:
         deleted = await bot.delete_messages(message.chat.id, message_ids)
+        reason = parse_moderation_reason(message, target_argument=False, count_argument=True)
         await database.log_moderation_event(
-            message.chat.id, message.from_user.id, None, "purge", f"диапазон до {message.message_id}, запрос {count}"
+            message.chat.id, message.from_user.id, None, "purge",
+            f"диапазон до {message.message_id}, запрос {count}; Причина: {reason}"
         )
         # Telegram's bulk delete endpoint does not return the exact deleted count.
         await message.answer(f"🧹 Запрос на очистку {count} последних сообщений выполнен.")
@@ -512,8 +555,11 @@ async def clear_warnings(message: Message, bot: Bot, owner_id: int) -> None:
         return
     if not await _can_manage_target(message, bot, owner_id, target.id):
         return
+    reason = parse_moderation_reason(message)
     await database.reset_warnings(message.chat.id, target.id)
-    await database.log_moderation_event(message.chat.id, message.from_user.id, target.id, "warnings_reset")
+    await database.log_moderation_event(
+        message.chat.id, message.from_user.id, target.id, "warnings_reset", f"Причина: {reason}"
+    )
     await message.answer(f"✅ Предупреждения пользователя <code>{target.id}</code> сброшены.", parse_mode="HTML")
 
 

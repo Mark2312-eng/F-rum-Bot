@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from moderation import contains_link, format_moderation_log, owner_summary, parse_mute_duration
+from moderation import contains_link, format_moderation_log, owner_summary, parse_mute_duration, parse_moderation_reason
 from group_settings import FLOOD_LABELS, LINK_LABELS, settings_keyboard, settings_text
 
 
@@ -58,6 +58,44 @@ class ModerationUnitTests(unittest.TestCase):
     def test_mute_duration_rejects_unbounded_or_invalid_values(self):
         message = SimpleNamespace(text="/mute 123456 30d", reply_to_message=None)
         self.assertIsNone(parse_mute_duration(message))
+
+    def test_moderation_reason_is_extracted_after_target_id(self):
+        message = SimpleNamespace(text="/ban 123456 repeated spam", reply_to_message=None)
+        self.assertEqual(parse_moderation_reason(message), "repeated spam")
+
+    def test_moderation_reason_is_extracted_from_reply_command(self):
+        message = SimpleNamespace(text="/warn repeated spam", reply_to_message=object())
+        self.assertEqual(parse_moderation_reason(message), "repeated spam")
+
+    def test_mute_reason_skips_target_and_duration(self):
+        message = SimpleNamespace(text="/mute 123456 30m repeated spam", reply_to_message=None)
+        self.assertEqual(
+            parse_moderation_reason(message, duration_argument=True),
+            "repeated spam",
+        )
+
+    def test_mute_reason_from_reply_skips_only_duration(self):
+        message = SimpleNamespace(text="/mute 1h repeated spam", reply_to_message=object())
+        self.assertEqual(
+            parse_moderation_reason(message, duration_argument=True),
+            "repeated spam",
+        )
+
+    def test_purge_reason_supports_optional_count(self):
+        with_count = SimpleNamespace(text="/purge 20 cleanup", reply_to_message=None)
+        without_count = SimpleNamespace(text="/purge cleanup", reply_to_message=None)
+        self.assertEqual(
+            parse_moderation_reason(with_count, target_argument=False, count_argument=True),
+            "cleanup",
+        )
+        self.assertEqual(
+            parse_moderation_reason(without_count, target_argument=False, count_argument=True),
+            "cleanup",
+        )
+
+    def test_missing_moderation_reason_gets_explicit_placeholder(self):
+        message = SimpleNamespace(text="/ban 123456", reply_to_message=None)
+        self.assertEqual(parse_moderation_reason(message), "Причина не указана")
 
     def test_settings_labels_cover_supported_values(self):
         self.assertEqual(set(FLOOD_LABELS), {"off", "balanced", "strict"})
