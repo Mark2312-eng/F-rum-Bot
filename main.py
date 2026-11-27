@@ -22,7 +22,7 @@ from database import database
 from moderation import ban_member, clear_warnings, kick_member, moderate_message, mute_member, owner_summary, purge_messages, register_group, show_ban_info, show_ban_list, show_moderation_log, show_moderation_stats, show_warning_history, show_warning_list, show_warnings, unban_member, unmute_member, warn_member
 from group_settings import apply_setting_callback, show_group_settings
 from advanced_moderation import blacklist_command, nickname_command, report_command, reportclose_command, reports_command, role_command
-from system_roles import staff_command, myrole_command, staffinfo_command, setrole_command, staffremove_command, stafflog_command, rolehelp_command, syshealth_command, reporthelp_command
+from system_roles import staff_command, myrole_command, staffinfo_command, setrole_command, staffremove_command, stafflog_command, rolehelp_command, syshealth_command, reporthelp_command, has_permission
 from testing import create_test_command, add_question_command, send_test_command, test_results_command, handle_test_start, test_answer_callback
 from chat_roles import roles_command, newrole_command, delrole_command, set_chat_role_command, remove_chat_role_command, editcmd_command, gm_command, rolelog_command, command_permissions_command
 from user_stats import ChatActivityMiddleware, user_stats_command
@@ -303,8 +303,7 @@ def _panel_user(request: web.Request) -> int | None:
         user_id = int(user_text)
     except (ValueError, UnicodeError, web.HTTPException):
         return None
-    admin_id = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
-    return user_id if admin_id.isdigit() and user_id == int(admin_id) else None
+    return user_id if user_id > 0 else None
 
 
 async def panel_options(request: web.Request) -> web.Response:
@@ -331,13 +330,18 @@ async def panel_login(request: web.Request) -> web.Response:
         raise web.HTTPBadRequest(text="Некорректные данные авторизации.")
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     admin_id = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
-    if not bot_token or not admin_id.isdigit() or not _telegram_login_valid(data, bot_token):
+    if not bot_token or not _telegram_login_valid(data, bot_token):
         raise web.HTTPUnauthorized(text="Не удалось подтвердить вход через Telegram.")
-    if int(data.get("id", 0)) != int(admin_id):
-        raise web.HTTPForbidden(text="Этот аккаунт не имеет доступа к панели.")
+    user_id = int(data.get("id", 0))
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    is_owner = admin_id.isdigit() and user_id == int(admin_id)
+    is_support_staff = await has_permission(user_id, owner_id, "support")
+    can_view_panel = await has_permission(user_id, owner_id, "staff_view")
+    if not (is_owner or is_support_staff or can_view_panel):
+        raise web.HTTPForbidden(text="У этого аккаунта нет доступа к панели.")
     response = web.json_response({"ok": True})
     response.set_cookie(
-        "panel_session", _make_panel_session(int(admin_id)),
+        "panel_session", _make_panel_session(user_id),
         max_age=3600, httponly=True, secure=True, samesite="None", path="/",
     )
     return _panel_cors(request, response)
@@ -360,6 +364,9 @@ async def panel_dashboard(request: web.Request) -> web.Response:
     if user_id is None:
         response = web.json_response({"error": "Требуется авторизация."}, status=401)
         return _panel_cors(request, response)
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if not await has_permission(user_id, owner_id, "staff_view"):
+        return _panel_cors(request, web.json_response({"chats": [], "tests": [], "results": []}))
     pool = database._require_pool()
     chats = await pool.fetch(
         "SELECT chat_id, title, moderation_mode, created_at FROM registered_chats ORDER BY title"
@@ -399,6 +406,9 @@ async def panel_moderation(request: web.Request) -> web.Response:
     if user_id is None:
         return _panel_cors(request, web.json_response({"error": "Требуется авторизация."}, status=401))
 
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if not (await has_permission(user_id, owner_id, "moderation") or await has_permission(user_id, owner_id, "reports")):
+        return _panel_cors(request, web.json_response({"summary": {"open_reports": 0, "events_week": 0, "members_count": 0, "warned_members": 0}, "reports": [], "events": [], "members": []}))
     pool = database._require_pool()
     summary = await pool.fetchrow(
         """SELECT
@@ -470,6 +480,9 @@ async def panel_close_report(request: web.Request) -> web.Response:
     user_id = _panel_user(request)
     if user_id is None:
         return _panel_cors(request, web.json_response({"error": "Требуется авторизация."}, status=401))
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if not await has_permission(user_id, owner_id, "reports"):
+        return _panel_cors(request, web.json_response({"error": "Недостаточно прав."}, status=403))
 
     report_id = int(request.match_info["report_id"])
     pool = database._require_pool()
