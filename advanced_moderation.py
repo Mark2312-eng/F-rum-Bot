@@ -116,6 +116,11 @@ async def blacklist_command(message: Message, bot: Bot, owner_id: int) -> None:
 async def nickname_command(message: Message, bot: Bot, owner_id: int) -> None:
     if not await _allowed(message, bot, owner_id):
         return
+    from system_roles import has_permission
+    member = await bot.get_chat_member(message.chat.id, message.from_user.id)
+    if message.from_user.id != owner_id and member.status not in {"administrator", "creator"} and not await has_permission(message.from_user.id, owner_id, "moderation"):
+        await message.reply("⛔ Никнеймы доступны модераторам и выше.")
+        return
     parts = (message.text or "").split(maxsplit=2)
     if len(parts) >= 3 and parts[1].lower() == "set":
         target_id = None
@@ -149,8 +154,9 @@ async def role_command(message: Message, bot: Bot, owner_id: int) -> None:
     if not await _allowed(message, bot, owner_id):
         return
     member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-    if message.from_user.id != owner_id and member.status not in {"administrator", "creator"}:
-        await message.reply("⛔ Управлять ролями могут только владелец и администраторы Telegram.")
+    from system_roles import has_permission
+    if message.from_user.id != owner_id and member.status not in {"administrator", "creator"} and not await has_permission(message.from_user.id, owner_id, "staff_manage"):
+        await message.reply("⛔ Управлять ролями могут владельцы, администраторы Telegram и руководство бота.")
         return
     parts = (message.text or "").split()
     if len(parts) == 1 or parts[1].lower() == "list":
