@@ -142,7 +142,7 @@ async def _get_moderation_target(message: Message, bot: Bot):
         return message.reply_to_message.from_user
     raw_text = (message.text or "").strip()
     raw_parts = raw_text.split(maxsplit=1)
-    raw_id = raw_parts[1].strip() if raw_text.startswith("/") and len(raw_parts) > 1 else raw_text
+    raw_id = raw_parts[1].split(maxsplit=1)[0].strip() if raw_text.startswith("/") and len(raw_parts) > 1 else raw_text
     try:
         target_id = int(raw_id)
     except (TypeError, ValueError):
@@ -167,7 +167,7 @@ async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
         return
     target = await _get_moderation_target(message, bot)
     if target is None or target.is_bot:
-        await message.reply("Ответь на сообщение участника или отправь его Telegram ID.")
+        await message.reply("Ответьте на сообщение участника или укажите его Telegram ID.")
         return
     if target.id == owner_id or await is_chat_admin(bot, message.chat.id, target.id):
         await message.reply("Нельзя выдать предупреждение владельцу или администратору.")
@@ -212,22 +212,29 @@ async def mute_member(message: Message, bot: Bot, owner_id: int) -> None:
         return
     target = await _get_moderation_target(message, bot)
     if target is None or target.is_bot or target.id == owner_id:
-        await message.reply("Ответь на сообщение участника или укажи его Telegram ID: /mute 123456.")
+        await message.reply("Ответь на сообщение участника или укажи его Telegram ID: /mute 123456 30m.")
         return
     if await is_chat_admin(bot, message.chat.id, target.id):
         await message.reply("Нельзя ограничить администратора группы.")
         return
+    args = (message.text or "").split()
+    duration_text = args[2].lower() if len(args) > 2 and args[0].startswith("/") else (args[1].lower() if len(args) > 1 and not args[0].startswith("/") else "10m")
+    duration_seconds = {"5m": 300, "10m": 600, "30m": 1800, "1h": 3600, "12h": 43200, "1d": 86400, "7d": 604800}.get(duration_text)
+    if duration_seconds is None:
+        await message.reply("Срок: 5m, 10m, 30m, 1h, 12h, 1d или 7d. Пример: /mute 123456 30m.")
+        return
+    duration_label = {"5m": "5 минут", "10m": "10 минут", "30m": "30 минут", "1h": "1 час", "12h": "12 часов", "1d": "1 день", "7d": "7 дней"}[duration_text]
     try:
         await bot.restrict_chat_member(
             message.chat.id,
             target.id,
             permissions=ChatPermissions(can_send_messages=False),
-            until_date=int(time.time()) + 600,
+            until_date=int(time.time()) + duration_seconds,
         )
         await database.log_moderation_event(
-            message.chat.id, message.from_user.id, target.id, "manual_mute", "10 минут"
+            message.chat.id, message.from_user.id, target.id, "manual_mute", duration_label
         )
-        await message.answer(f"🔇 {target.mention_html()} ограничен на 10 минут.", parse_mode="HTML")
+        await message.answer(f"🔇 {target.mention_html()} ограничен на {duration_label}.", parse_mode="HTML")
     except Exception:
         await message.reply("Не удалось применить ограничение. Проверь права бота.")
 
@@ -346,7 +353,7 @@ async def purge_messages(message: Message, bot: Bot, owner_id: int) -> None:
     if not 1 <= count <= 100:
         await message.reply("Укажите количество от 1 до 100: /purge 20.")
         return
-    first_id = max(1, message.message_id - count)
+    first_id = max(1, message.message_id - count + 1)
     message_ids = list(range(first_id, message.message_id + 1))
     try:
         deleted = await bot.delete_messages(message.chat.id, message_ids)
