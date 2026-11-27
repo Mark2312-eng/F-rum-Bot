@@ -72,23 +72,27 @@
       </div>
     </section>
 
-    <section id="commands" class="section commands-section">
-      <div class="section-heading"><div><p class="eyebrow">БЫСТРЫЙ СПРАВОЧНИК / 03</p><h2>Основные <span>команды.</span></h2></div><p class="section-intro">Краткий список команд для начала работы. Доступность зависит от прав пользователя и типа чата.</p></div>
-      <div class="command-list">
-        <div><code>/help</code><span>Список команд и краткая справка</span><small>ОСНОВНОЕ</small></div>
-        <div><code>/connect</code><span>Подключение текущей группы владельцем бота</span><small>НАСТРОЙКА</small></div>
-        <div><code>/settings</code><span>Настройки антифлуда и ссылок в группе</span><small>НАСТРОЙКА</small></div>
-        <div><code>/modlog</code><span>Журнал действий модерации</span><small>МОДЕРАЦИЯ</small></div>
-        <div><code>/roles</code><span>Список ролей и уровней доступа группы</span><small>ДОСТУПЫ</small></div>
-        <div><code>/createtest</code><span>Создание теста для команды</span><small>ТЕСТЫ</small></div>
-        <div><code>/testadd</code><span>Вопрос: /testadd ID | вопрос | правильный ответ | варианты</span><small>ТЕСТЫ</small></div>
-        <div><code>/sendtest</code><span>Приглашение: /sendtest TELEGRAM_ID ID_ТЕСТА</span><small>ТЕСТЫ</small></div>
-        <div><code>/testresults</code><span>Просмотр результатов тестирования по ID теста</span><small>ТЕСТЫ</small></div>
+    <section id="commands" class="section commands-section reveal">
+      <div class="section-heading"><div><p class="eyebrow">БЫСТРЫЙ СПРАВОЧНИК / 03</p><h2>Основные <span>команды.</span></h2></div><p class="section-intro">Найди команду по названию или назначению. Нажми «Копировать», чтобы быстро перенести её в Telegram.</p></div>
+      <label class="command-search"><span aria-hidden="true">⌕</span><input id="commandSearch" type="search" placeholder="Поиск команды..." autocomplete="off" aria-label="Поиск команды"><kbd>/</kbd></label>
+      <p class="search-count" id="searchCount" aria-live="polite">Показаны все команды</p>
+      <div class="command-list" id="commandList">
+        <div class="command-row"><code>/help</code><span>Список команд и краткая справка</span><small>ОСНОВНОЕ</small><button class="copy-command" type="button" aria-label="Скопировать /help">Копировать</button></div>
+        <div class="command-row"><code>/connect</code><span>Подключение текущей группы владельцем бота</span><small>НАСТРОЙКА</small><button class="copy-command" type="button" aria-label="Скопировать /connect">Копировать</button></div>
+        <div class="command-row"><code>/settings</code><span>Настройки антифлуда и ссылок в группе</span><small>НАСТРОЙКА</small><button class="copy-command" type="button" aria-label="Скопировать /settings">Копировать</button></div>
+        <div class="command-row"><code>/modlog</code><span>Журнал действий модерации</span><small>МОДЕРАЦИЯ</small><button class="copy-command" type="button" aria-label="Скопировать /modlog">Копировать</button></div>
+        <div class="command-row"><code>/roles</code><span>Список ролей и уровней доступа группы</span><small>ДОСТУПЫ</small><button class="copy-command" type="button" aria-label="Скопировать /roles">Копировать</button></div>
+        <div class="command-row"><code>/createtest</code><span>Создание теста для команды</span><small>ТЕСТЫ</small><button class="copy-command" type="button" aria-label="Скопировать /createtest">Копировать</button></div>
+        <div class="command-row"><code>/testadd</code><span>Добавление вопроса к тесту</span><small>ТЕСТЫ</small><button class="copy-command" type="button" aria-label="Скопировать /testadd">Копировать</button></div>
+        <div class="command-row"><code>/sendtest</code><span>Отправка приглашения участнику на тест</span><small>ТЕСТЫ</small><button class="copy-command" type="button" aria-label="Скопировать /sendtest">Копировать</button></div>
+        <div class="command-row"><code>/testresults</code><span>Просмотр результатов тестирования</span><small>ТЕСТЫ</small><button class="copy-command" type="button" aria-label="Скопировать /testresults">Копировать</button></div>
       </div>
+      <p class="commands-note">Список ознакомительный. Фактическая доступность команд зависит от версии бота, прав пользователя и настроек группы.</p>
     </section>
 
     <section class="closing-cta"><p class="eyebrow">VISE RUSSIA / COMMUNITY TOOLS</p><h2>Порядок начинается<br><span>с правильных инструментов.</span></h2><p>Откройте бота и изучите доступные команды.</p><a class="button button-primary" href="https://t.me/ViseRussiaHelpForumBot" target="_blank" rel="noopener">Открыть F-rum-Bot <span>↗</span></a></section>
   </main>
   <footer><a class="brand footer-brand" href="#"><span class="brand-mark">F</span><span>F-rum<span class="brand-accent">-Bot</span><small>VISE RUSSIA COMMUNITY TOOLS</small></span></a><span>© F-rum-Bot · VISE RUSSIA</span><a href="https://github.com/Mark2312-eng/F-rum-Bot" target="_blank" rel="noopener">Исходный код на GitHub ↗</a></footer>
+  <script src="app.js" defer></script>
 </body>
 </html>
