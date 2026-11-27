@@ -517,6 +517,89 @@ async def clear_warnings(message: Message, bot: Bot, owner_id: int) -> None:
     await message.answer(f"✅ Предупреждения пользователя <code>{target.id}</code> сброшены.", parse_mode="HTML")
 
 
+async def show_warning_history(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    target = await _get_moderation_target(message, bot)
+    if target is None:
+        await message.reply("Ответьте на сообщение участника или укажите ID: /warnhistory 123456.")
+        return
+    events = await database.get_moderation_events_for_target(
+        message.chat.id, target.id, ["warning", "auto_mute", "warnings_reset"], 20,
+    )
+    if not events:
+        await message.answer(f"📜 История предупреждений <code>{target.id}</code> пуста.", parse_mode="HTML")
+        return
+    labels = {"warning": "Предупреждение", "auto_mute": "Автоматическое ограничение", "warnings_reset": "Сброс предупреждений"}
+    lines = [f"📜 <b>История предупреждений</b> · <code>{target.id}</code>", ""]
+    for event in events:
+        stamp = event["created_at"]
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        when = stamp.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+        detail = f" · {escape(str(event['details']))}" if event["details"] else ""
+        actor = f" · модератор <code>{event['actor_id']}</code>" if event["actor_id"] else ""
+        lines.append(f"• {labels.get(event['action'], 'Событие')}{detail}{actor}\n  <i>{when}</i>")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+async def show_warning_list(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    rows = await database.get_warned_members(message.chat.id, 30)
+    if not rows:
+        await message.answer("⚠️ Участников с активными предупреждениями нет.")
+        return
+    lines = ["⚠️ <b>Участники с предупреждениями</b>", ""]
+    for row in rows:
+        lines.append(f"• <code>{row['user_id']}</code> — <b>{row['warning_count']}/{WARNING_LIMIT}</b>")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+async def show_ban_list(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    rows = await database.get_logged_bans(message.chat.id, 30)
+    active = [row for row in rows if row["action"] == "ban"]
+    if not active:
+        await message.answer("⛔ В журнале бота нет активных блокировок.")
+        return
+    lines = ["⛔ <b>Блокировки, зарегистрированные ботом</b>", ""]
+    for row in active:
+        stamp = row["created_at"]
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        when = stamp.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+        lines.append(f"• <code>{row['target_id']}</code> · {when}")
+    lines.append("\n<i>Список основан на журнале действий бота, а не на полном списке Telegram.</i>")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+async def show_ban_info(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    target = await _get_moderation_target(message, bot)
+    if target is None:
+        await message.reply("Ответьте на сообщение участника или укажите ID: /baninfo 123456.")
+        return
+    events = await database.get_moderation_events_for_target(
+        message.chat.id, target.id, ["ban", "unban"], 10,
+    )
+    if not events:
+        await message.answer(f"⛔ В журнале бота нет сведений о блокировках <code>{target.id}</code>.", parse_mode="HTML")
+        return
+    latest = events[0]
+    stamp = latest["created_at"]
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    when = stamp.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+    state = "🔴 Заблокирован (по журналу бота)" if latest["action"] == "ban" else "🟢 Разблокирован (по журналу бота)"
+    lines = [f"⛔ <b>Информация о блокировке</b>", f"ID: <code>{target.id}</code>", state, f"Последнее действие: {when}"]
+    if latest["details"]:
+        lines.append(f"Причина/детали: {escape(str(latest['details']))}")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
 async def show_moderation_stats(message: Message, bot: Bot, owner_id: int) -> None:
     if not await _moderation_command_allowed(message, bot, owner_id):
         return
