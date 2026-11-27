@@ -129,3 +129,39 @@ a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-of
 .support-closed-note{color:var(--muted);font-size:11px}
 @media(max-width:760px){.support-shell{padding:18px}.support-columns{grid-template-columns:1fr;gap:18px}.support-create{padding:0 0 14px;border-right:0;border-bottom:1px solid var(--line)}}
 @media(prefers-reduced-motion:reduce){.support-ticket{transition:none}}
+
+
+/* Desktop layout refinement: readable width and balanced support conversation */
+@media (min-width: 1100px) {
+  .site-header { padding-left: max(calc((100vw - 1250px) / 2), 4vw); padding-right: max(calc((100vw - 1250px) / 2), 4vw); }
+  .hero { max-width: 1320px; grid-template-columns: 1fr 1fr; gap: 42px; }
+  .section { max-width: 1320px; padding-top: 96px; padding-bottom: 96px; }
+  .commands-section { padding-bottom: 64px; }
+  .support-section { padding-top: 64px; }
+  .support-shell { padding: 32px; }
+  .support-columns { grid-template-columns: minmax(280px, .78fr) minmax(0, 1.22fr); gap: 36px; }
+  .support-create { padding-right: 32px; }
+  .support-thread { max-width: 900px; margin: 22px auto 0; padding: 22px; }
+  .support-thread-head b { font-size: 15px; }
+  .support-thread-head small { font-size: 11px; }
+  .support-messages { max-width: 780px; max-height: 460px; margin: 0 auto; gap: 14px; padding: 22px 4px; }
+  .support-message { max-width: min(76%, 680px); padding: 14px 17px; border-radius: 11px; }
+  .support-message small { font-size: 10px; }
+  .support-message p { font-size: 13px; line-height: 1.75; }
+  .support-reply-form { max-width: 780px; margin: 0 auto; gap: 12px; }
+  .support-reply-form textarea { min-height: 116px; padding: 15px; font-size: 14px; }
+  .support-reply-form .button { width: fit-content; min-width: 220px; justify-self: end; padding: 14px 22px; }
+}
+@media (min-width: 761px) and (max-width: 1099px) {
+  .support-thread { max-width: 100%; }
+  .support-messages, .support-reply-form { max-width: 100%; }
+  .support-message { max-width: 84%; }
+}
+@media (min-width: 761px) {
+  .support-create h3, .support-history h3 { font-size: 20px; }
+  .support-create label { font-size: 12px; }
+  .support-create input, .support-create textarea { font-size: 13px; padding: 13px; }
+  .support-ticket { padding: 14px 16px; }
+  .support-ticket b { font-size: 12px; }
+  .support-ticket small { font-size: 11px; }
+}
