@@ -489,6 +489,51 @@ class Database:
             chat_id, user_id,
         )
 
+    async def get_moderation_events_for_target(
+        self, chat_id: int, user_id: int, actions: list[str] | None = None, limit: int = 20,
+    ) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        safe_limit = max(1, min(int(limit), 50))
+        if actions:
+            return await pool.fetch(
+                """SELECT actor_id, target_id, action, details, created_at
+                   FROM moderation_events
+                   WHERE chat_id = $1 AND target_id = $2 AND action = ANY($3::text[])
+                   ORDER BY created_at DESC, id DESC LIMIT $4""",
+                chat_id, user_id, actions, safe_limit,
+            )
+        return await pool.fetch(
+            """SELECT actor_id, target_id, action, details, created_at
+               FROM moderation_events
+               WHERE chat_id = $1 AND target_id = $2
+               ORDER BY created_at DESC, id DESC LIMIT $3""",
+            chat_id, user_id, safe_limit,
+        )
+
+    async def get_warned_members(self, chat_id: int, limit: int = 30) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        safe_limit = max(1, min(int(limit), 50))
+        return await pool.fetch(
+            """SELECT user_id, warning_count, updated_at
+               FROM moderation_warnings
+               WHERE chat_id = $1 AND warning_count > 0
+               ORDER BY warning_count DESC, updated_at DESC
+               LIMIT $2""",
+            chat_id, safe_limit,
+        )
+
+    async def get_logged_bans(self, chat_id: int, limit: int = 30) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        safe_limit = max(1, min(int(limit), 50))
+        return await pool.fetch(
+            """SELECT DISTINCT ON (target_id) target_id, action, details, created_at
+               FROM moderation_events
+               WHERE chat_id = $1 AND target_id IS NOT NULL
+                 AND action IN ('ban', 'unban')
+               ORDER BY target_id, created_at DESC, id DESC""",
+            chat_id,
+        )
+
     async def get_moderation_stats(self, chat_id: int) -> list[asyncpg.Record]:
         pool = self._require_pool()
         return await pool.fetch(
