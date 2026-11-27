@@ -29,7 +29,10 @@ class TelegramLoginTests(unittest.TestCase):
             "auth_date": str(int(time.time())),
             **extra,
         }
-        data_check = "\n".join(f"{key}={data[key]}" for key in sorted(data))
+        data_check = "\n".join(
+            f"{key}={str(data[key]).lower() if isinstance(data[key], bool) else data[key]}"
+            for key in sorted(data)
+        )
         secret = hashlib.sha256(self.token.encode()).digest()
         data["hash"] = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
         return data
