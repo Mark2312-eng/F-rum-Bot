@@ -139,14 +139,13 @@ async def setrole_command(message: Message, owner_id: int, forced_role: str | No
     if target_id == owner_id or target_id == actor_id:
         await message.reply("Нельзя изменить должность владельца или самого себя.")
         return
-    actor_rank = await _actor_rank(actor_id, owner_id)
-    current_role = await get_role(target_id, owner_id)
-    current_rank = await _actor_rank(target_id, owner_id)
-    if actor_rank <= max(current_rank, ROLES[key]["rank"]):
+    role_ranks = {role_key: data["rank"] for role_key, data in ROLES.items()}
+    assigned = await database.assign_system_role_guarded(
+        target_id, key, actor_id, owner_id, role_ranks
+    )
+    if not assigned:
         await message.reply("⛔ Нельзя назначать равную/старшую должность или менять сотрудника равного/старшего уровня.")
         return
-    await database.set_system_role(target_id, key, actor_id)
-    await database.add_system_staff_log(actor_id, target_id, "set_role", key)
     await message.answer(f"✅ Пользователю <code>{target_id}</code> назначена должность: <b>{escape(ROLES[key]['title'])}</b>.", parse_mode="HTML")
 
 
@@ -162,14 +161,13 @@ async def staffremove_command(message: Message, owner_id: int) -> None:
     if target_id in {owner_id, message.from_user.id}:
         await message.reply("Нельзя снять должность владельца или самого себя.")
         return
-    actor_rank = await _actor_rank(message.from_user.id, owner_id)
-    target_rank = await _actor_rank(target_id, owner_id)
-    if actor_rank <= target_rank:
-        await message.reply("Нельзя снимать сотрудника равного или более высокого уровня.")
+    role_ranks = {role_key: data["rank"] for role_key, data in ROLES.items()}
+    removed = await database.remove_system_role_guarded(
+        target_id, message.from_user.id, owner_id, role_ranks
+    )
+    if not removed:
+        await message.reply("Нельзя снимать сотрудника равного или более высокого уровня либо сотрудник не найден.")
         return
-    removed = await database.remove_system_role(target_id)
-    if removed:
-        await database.add_system_staff_log(message.from_user.id, target_id, "remove_role", "")
     await message.answer("✅ Должность снята." if removed else "Сотрудник не найден.")
 
 
