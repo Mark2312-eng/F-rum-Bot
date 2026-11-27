@@ -3,7 +3,7 @@
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import timezone
 from html import escape
 
 from aiogram import Bot, Dispatcher, F
@@ -20,8 +20,6 @@ from aiogram.types import (
 from database import database
 
 LOGGER = logging.getLogger(__name__)
-VIP_PERIOD_DAYS = 30
-VIP_PERIOD_SQL = "30 days"
 TIERS = {
     "silver": {
         "name": "VIP Silver",
@@ -360,6 +358,12 @@ async def vip_successful_payment(message: Message) -> None:
     pool = database._require_pool()
     async with pool.acquire() as connection:
         async with connection.transaction():
+            already_processed = await connection.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM bot_vip_payments WHERE telegram_charge_id = $1)",
+                payment.telegram_payment_charge_id,
+            )
+            if already_processed:
+                return
             intent = await connection.fetchrow(
                 """SELECT user_id, tier, amount, status
                    FROM bot_vip_invoice_intents WHERE payload = $1 FOR UPDATE""",
