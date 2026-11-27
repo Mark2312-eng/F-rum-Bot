@@ -85,8 +85,10 @@ async def blacklist_command(message: Message, bot: Bot, owner_id: int) -> None:
     if not await _allowed(message, bot, owner_id):
         return
     member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-    if message.from_user.id != owner_id and member.status not in {"administrator", "creator"}:
-        await message.reply("⛔ Общий чёрный список доступен только владельцу и администраторам Telegram.")
+    from system_roles import has_permission
+    can_manage_globally = await has_permission(message.from_user.id, owner_id, "staff_manage")
+    if message.from_user.id != owner_id and member.status not in {"administrator", "creator"} and not can_manage_globally:
+        await message.reply("⛔ Общий чёрный список доступен владельцу, администраторам Telegram и руководству бота.")
         return
     parts = (message.text or "").split(maxsplit=2)
     if len(parts) < 2:
