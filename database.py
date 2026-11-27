@@ -191,13 +191,28 @@ class Database:
                     title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 120),
                     creator_id BIGINT NOT NULL,
                     chat_id BIGINT NOT NULL REFERENCES registered_chats(chat_id) ON DELETE CASCADE,
-                    role_key TEXT NOT NULL CHECK (role_key IN ('moderator')),
+                    role_key TEXT NOT NULL,
                     pass_score INTEGER NOT NULL CHECK (pass_score BETWEEN 1 AND 100),
                     cooldown_days INTEGER NOT NULL DEFAULT 7 CHECK (cooldown_days BETWEEN 0 AND 90),
                     time_limit_minutes INTEGER NOT NULL DEFAULT 30 CHECK (time_limit_minutes BETWEEN 1 AND 240),
                     is_active BOOLEAN NOT NULL DEFAULT TRUE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+                ALTER TABLE moderation_tests
+                    DROP CONSTRAINT IF EXISTS moderation_tests_role_key_check;
+                DO $ BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'moderation_tests_chat_role_fk'
+                          AND conrelid = 'moderation_tests'::regclass
+                    ) THEN
+                        ALTER TABLE moderation_tests
+                            ADD CONSTRAINT moderation_tests_chat_role_fk
+                            FOREIGN KEY (chat_id, role_key)
+                            REFERENCES chat_role_definitions(chat_id, role_key)
+                            ON DELETE CASCADE;
+                    END IF;
+                END $;
                 CREATE INDEX IF NOT EXISTS moderation_tests_creator_idx
                     ON moderation_tests (creator_id, created_at DESC);
                 CREATE TABLE IF NOT EXISTS moderation_test_questions (
@@ -753,6 +768,57 @@ class Database:
                 await connection.execute(
                     """INSERT INTO chat_role_audit (chat_id, actor_id, target_id, action, details)
                        VALUES ($1, $2, $3, 'assign_role', $4)""",
+                    chat_id, actor_id, user_id, role_key,
+                )
+                return True
+
+    async def assign_test_role_guarded(
+        self, chat_id: int, user_id: int, role_key: str, actor_id: int,
+    ) -> bool:
+        """Assign a test-earned local role only when it cannot elevate or overwrite a peer."""
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute("SELECT pg_advisory_xact_lock($1)", chat_id)
+                role = await connection.fetchrow(
+                    """SELECT priority FROM chat_role_definitions
+                       WHERE chat_id = $1 AND role_key = $2""", chat_id, role_key,
+                )
+                if not role or not 1 <= int(role["priority"]) <= 79:
+                    return False
+                target_priority = await connection.fetchval(
+                    """SELECT MAX(priority) FROM (
+                         SELECT r.priority FROM chat_member_roles m
+                         JOIN chat_role_definitions r
+                           ON r.chat_id = m.chat_id AND r.role_key = m.role_key
+                         WHERE m.chat_id = $1 AND m.user_id = $2
+                         UNION ALL
+                         SELECT 40 WHERE EXISTS (
+                           SELECT 1 FROM chat_moderators WHERE chat_id = $1 AND user_id = $2
+                         )
+                       ) p""", chat_id, user_id,
+                ) or 0
+                immune = await connection.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM chat_role_immunity WHERE chat_id = $1 AND user_id = $2)",
+                    chat_id, user_id,
+                )
+                if immune or int(target_priority) >= int(role["priority"]):
+                    return False
+                await connection.execute(
+                    """INSERT INTO chat_member_roles (chat_id, user_id, role_key, assigned_by)
+                       VALUES ($1, $2, $3, $4)
+                       ON CONFLICT (chat_id, user_id) DO UPDATE SET
+                       role_key = EXCLUDED.role_key, assigned_by = EXCLUDED.assigned_by,
+                       assigned_at = NOW()""",
+                    chat_id, user_id, role_key, actor_id,
+                )
+                await connection.execute(
+                    "DELETE FROM chat_moderators WHERE chat_id = $1 AND user_id = $2",
+                    chat_id, user_id,
+                )
+                await connection.execute(
+                    """INSERT INTO chat_role_audit (chat_id, actor_id, target_id, action, details)
+                       VALUES ($1, $2, $3, 'test_role_assignment', $4)""",
                     chat_id, actor_id, user_id, role_key,
                 )
                 return True
