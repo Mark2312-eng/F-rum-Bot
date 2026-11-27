@@ -14,6 +14,7 @@ DEFAULT_COMMAND_PRIORITIES = {
     "mute": 20, "unmute": 20, "kick": 20,
     "ban": 40, "unban": 40, "purge": 40,
     "modstats": 20, "modlog": 20,
+    "reports": 20, "reportclose": 40, "role": 80, "nick": 40, "blacklist": 80,
 }
 MANAGEABLE_COMMANDS = set(DEFAULT_COMMAND_PRIORITIES) | {
     "reports", "reportclose", "role", "nick", "blacklist",
