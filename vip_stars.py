@@ -140,13 +140,13 @@ def _compare_text() -> str:
         for tier in TIERS
     }
     return (
-        "📊 <b>Сравнение VIP-уровней</b>\\n\\n"
-        f"🥈 <b>Silver · {price_labels['silver']}</b>\\n"
-        "• VIP-бейдж\\n• /vipprofile и /vipbadge\\n\\n"
-        f"🥇 <b>Gold · {price_labels['gold']}</b>\\n"
-        "• Всё из Silver\\n• Персональное имя: /vipname\\n\\n"
-        f"💎 <b>Diamond · {price_labels['diamond']}</b>\\n"
-        "• Всё из Gold\\n• Персональный титул: /viptitle\\n\\n"
+        "📊 <b>Сравнение VIP-уровней</b>\n\n"
+        f"🥈 <b>Silver · {price_labels['silver']}</b>\n"
+        "• VIP-бейдж\n• /vipprofile и /vipbadge\n\n"
+        f"🥇 <b>Gold · {price_labels['gold']}</b>\n"
+        "• Всё из Silver\n• Персональное имя: /vipname\n\n"
+        f"💎 <b>Diamond · {price_labels['diamond']}</b>\n"
+        "• Всё из Gold\n• Персональный титул: /viptitle\n\n"
         "Все тарифы действуют 30 дней без автопродления."
     )
 
