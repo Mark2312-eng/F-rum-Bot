@@ -1,4 +1,4 @@
-"""Tests for one-time VIP Stars shop configuration and presentation."""
+"""Tests for the one-time VIP Stars shop configuration and presentation."""
 
 import os
 import unittest
@@ -20,14 +20,14 @@ class VipStarsConfigurationTests(unittest.TestCase):
 
     def test_valid_configured_prices_are_read_from_environment(self):
         values = {
-            "VIP_SILVER_PRICE_STARS": "100",
-            "VIP_GOLD_PRICE_STARS": "250",
-            "VIP_DIAMOND_PRICE_STARS": "500",
+            "VIP_SILVER_PRICE_STARS": "25",
+            "VIP_GOLD_PRICE_STARS": "50",
+            "VIP_DIAMOND_PRICE_STARS": "100",
         }
         with patch.dict(os.environ, values, clear=True):
-            self.assertEqual(tier_price("silver"), 100)
-            self.assertEqual(tier_price("gold"), 250)
-            self.assertEqual(tier_price("diamond"), 500)
+            self.assertEqual(tier_price("silver"), 25)
+            self.assertEqual(tier_price("gold"), 50)
+            self.assertEqual(tier_price("diamond"), 100)
             buttons = [
                 button
                 for row in vip_shop_keyboard().inline_keyboard
