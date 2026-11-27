@@ -12,10 +12,15 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, C
 from aiohttp import web
 
 from database import database
-from system_roles import has_permission
+from system_roles import ROLES, has_permission
 
 MAX_MESSAGE = 2000
 STAFF_APPLICATION_ROLES = {"helper", "moderator", "support"}
+STAFF_APPLICATION_SYSTEM_ROLE_MAP = {"helper": "trainee", "moderator": "moderator", "support": "support"}
+
+
+def _staff_system_role_for_application(requested_role: str) -> str | None:
+    return STAFF_APPLICATION_SYSTEM_ROLE_MAP.get(requested_role)
 
 
 def _parse_interview_time(value: object) -> datetime | None:
@@ -182,7 +187,7 @@ async def ensure_support_schema() -> None:
             DROP CONSTRAINT IF EXISTS staff_application_events_action_check;
         ALTER TABLE staff_application_events
             ADD CONSTRAINT staff_application_events_action_check
-            CHECK (action IN ('submitted','approved','rejected','interview_scheduled','interview_completed'));
+            CHECK (action IN ('submitted','approved','rejected','interview_scheduled','interview_completed','role_assigned'));
         CREATE TABLE IF NOT EXISTS staff_application_interviews (
             id BIGSERIAL PRIMARY KEY,
             application_id BIGINT NOT NULL REFERENCES staff_applications(id),
@@ -683,11 +688,12 @@ async def staff_application_list(request: web.Request) -> web.Response:
     rows = await database._require_pool().fetch(
         """SELECT a.id,a.requested_role,a.status,a.review_note,a.created_at,a.reviewed_at,
                   i.scheduled_at AS interview_at,i.status AS interview_status,
-                  i.score AS interview_score,i.feedback AS interview_feedback
+                  i.score AS interview_score,i.feedback AS interview_feedback,ss.role_key AS assigned_role
            FROM staff_applications a LEFT JOIN LATERAL (
              SELECT * FROM staff_application_interviews WHERE application_id=a.id
              ORDER BY created_at DESC,id DESC LIMIT 1
-           ) i ON TRUE WHERE a.user_id=$1 ORDER BY a.created_at DESC LIMIT 20""",
+           ) i ON TRUE LEFT JOIN system_staff ss ON ss.user_id=a.user_id
+           WHERE a.user_id=$1 ORDER BY a.created_at DESC LIMIT 20""",
         user_id,
     )
     return _cors(request, web.json_response({"applications": [{
@@ -696,7 +702,7 @@ async def staff_application_list(request: web.Request) -> web.Response:
         "reviewed_at": row["reviewed_at"].isoformat() if row["reviewed_at"] else None,
         "interview_at": row["interview_at"].isoformat() if row["interview_at"] else None,
         "interview_status": row["interview_status"], "interview_score": row["interview_score"],
-        "interview_feedback": row["interview_feedback"],
+        "interview_feedback": row["interview_feedback"], "assigned_role": row["assigned_role"],
     } for row in rows]}))
 
 
@@ -710,8 +716,9 @@ async def staff_application_admin_list(request: web.Request) -> web.Response:
         """SELECT a.id,a.user_id,a.username,a.requested_role,a.experience,a.motivation,a.status,
                   a.review_note,a.created_at,a.reviewed_by,a.reviewed_at,
                   i.id AS interview_id,i.scheduled_at AS interview_at,i.status AS interview_status,
-                  i.score AS interview_score,i.feedback AS interview_feedback
-           FROM staff_applications a LEFT JOIN LATERAL (
+                  i.score AS interview_score,i.feedback AS interview_feedback,ss.role_key AS assigned_role
+           FROM staff_applications a LEFT JOIN system_staff ss ON ss.user_id=a.user_id
+           LEFT JOIN LATERAL (
              SELECT * FROM staff_application_interviews WHERE application_id=a.id
              ORDER BY created_at DESC,id DESC LIMIT 1
            ) i ON TRUE
@@ -731,7 +738,7 @@ async def staff_application_admin_list(request: web.Request) -> web.Response:
         "interview_id": row["interview_id"],
         "interview_at": row["interview_at"].isoformat() if row["interview_at"] else None,
         "interview_status": row["interview_status"], "interview_score": row["interview_score"],
-        "interview_feedback": row["interview_feedback"],
+        "interview_feedback": row["interview_feedback"], "assigned_role": row["assigned_role"],
     } for row in rows], "events": [{
         "application_id": row["application_id"], "user_id": row["user_id"],
         "requested_role": row["requested_role"], "actor_id": row["actor_id"],
@@ -897,6 +904,63 @@ async def staff_application_interview_result(request: web.Request) -> web.Respon
     return _cors(request, web.json_response({"ok": True, "score": score}))
 
 
+async def staff_application_assign_role(request: web.Request) -> web.Response:
+    if not _origin_allowed(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
+    actor_id = _admin_session(request)
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if actor_id is None or owner_id <= 0 or actor_id != owner_id:
+        return _cors(request, web.json_response({"error": "Назначать системные должности может только владелец."}, status=403))
+    application_id = int(request.match_info["application_id"])
+    pool = database._require_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT user_id,requested_role,status FROM staff_applications WHERE id=$1 FOR UPDATE",
+                application_id,
+            )
+            if not row:
+                return _cors(request, web.json_response({"error": "Заявка не найдена."}, status=404))
+            if row["status"] != "approved":
+                return _cors(request, web.json_response({"error": "Сначала одобрите заявку."}, status=409))
+            role_key = _staff_system_role_for_application(row["requested_role"])
+            if role_key not in ROLES:
+                return _cors(request, web.json_response({"error": "Для этой должности не настроено системное назначение."}, status=400))
+            existing_role = await conn.fetchval(
+                "SELECT role_key FROM system_staff WHERE user_id=$1", row["user_id"]
+            )
+            if existing_role:
+                return _cors(request, web.json_response({"error": "У пользователя уже есть системная должность. Измените её через управление командой."}, status=409))
+            if row["user_id"] == owner_id or ROLES[role_key]["rank"] >= 100:
+                return _cors(request, web.json_response({"error": "Недопустимый уровень системной должности."}, status=409))
+            assigned = await conn.execute(
+                """INSERT INTO system_staff(user_id,role_key,assigned_by)
+                   VALUES($1,$2,$3) ON CONFLICT(user_id) DO NOTHING""",
+                row["user_id"], role_key, actor_id,
+            )
+            if not assigned.endswith(" 1"):
+                return _cors(request, web.json_response({"error": "Системная должность уже назначена. Проверьте раздел команды."}, status=409))
+            await conn.execute(
+                """INSERT INTO system_staff_log(actor_id,target_id,action,details)
+                   VALUES($1,$2,'set_role',$3)""",
+                actor_id, row["user_id"], role_key,
+            )
+            await conn.execute(
+                """INSERT INTO staff_application_events(application_id,actor_id,action,details)
+                   VALUES($1,$2,'role_assigned',$3)""",
+                application_id, actor_id, role_key,
+            )
+            applicant_id = row["user_id"]
+    try:
+        await request.app["bot"].send_message(
+            applicant_id,
+            f"По заявке #{application_id} вам назначена системная должность: {ROLES[role_key]['title']}.",
+        )
+    except Exception:
+        pass
+    return _cors(request, web.json_response({"ok": True, "role_key": role_key}))
+
+
 def register_support_routes(app: web.Application) -> None:
     app.router.add_route("OPTIONS", "/api/support/{tail:.*}", support_options)
     app.router.add_post("/api/support/auth/telegram", support_login)
@@ -907,6 +971,7 @@ def register_support_routes(app: web.Application) -> None:
     app.router.add_get("/api/support/applications", staff_application_list)
     app.router.add_get("/api/support/staff/applications", staff_application_admin_list)
     app.router.add_post("/api/support/staff/applications/{application_id:[0-9]+}/review", staff_application_review)
+    app.router.add_post("/api/support/staff/applications/{application_id:[0-9]+}/assign-role", staff_application_assign_role)
     app.router.add_post("/api/support/staff/applications/{application_id:[0-9]+}/interview", staff_application_interview_schedule)
     app.router.add_post("/api/support/staff/applications/{application_id:[0-9]+}/interview/result", staff_application_interview_result)
     app.router.add_post("/api/support/tickets", support_create)
