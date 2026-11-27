@@ -652,6 +652,71 @@ async def panel_people(request: web.Request) -> web.Response:
     return _panel_cors(request, web.json_response(payload))
 
 
+
+async def panel_member_history(request: web.Request) -> web.Response:
+    """Return one member's moderation profile and recent audit history (owner only)."""
+    await _panel_require_owner(request)
+    try:
+        chat_id = int(request.match_info["chat_id"])
+        user_id = int(request.match_info["user_id"])
+    except (KeyError, TypeError, ValueError):
+        raise web.HTTPBadRequest(text="Некорректный ID группы или участника.")
+    if chat_id >= 0 or user_id <= 0:
+        raise web.HTTPBadRequest(text="Некорректный ID группы или участника.")
+    if not await database.is_chat_registered(chat_id):
+        raise web.HTTPNotFound(text="Группа не найдена.")
+
+    pool = database._require_pool()
+    member = await pool.fetchrow(
+        """SELECT a.chat_id, COALESCE(c.title, '') AS chat_title,
+                  a.user_id, a.username, a.display_name, a.message_count,
+                  a.first_seen_at, COALESCE(w.warning_count, 0) AS warning_count,
+                  COALESCE(r.title, 'Участник') AS role_title,
+                  COALESCE(r.priority, 0) AS priority
+           FROM chat_member_activity a
+           LEFT JOIN registered_chats c ON c.chat_id = a.chat_id
+           LEFT JOIN moderation_warnings w
+             ON w.chat_id = a.chat_id AND w.user_id = a.user_id
+           LEFT JOIN chat_member_roles mr
+             ON mr.chat_id = a.chat_id AND mr.user_id = a.user_id
+           LEFT JOIN chat_role_definitions r
+             ON r.chat_id = mr.chat_id AND r.role_key = mr.role_key
+           WHERE a.chat_id = $1 AND a.user_id = $2""",
+        chat_id, user_id,
+    )
+    if member is None:
+        raise web.HTTPNotFound(text="Участник не найден в этой группе.")
+
+    events = await pool.fetch(
+        """SELECT actor_id, action, details, created_at
+           FROM moderation_events
+           WHERE chat_id = $1 AND target_id = $2
+           ORDER BY created_at DESC, id DESC LIMIT 50""",
+        chat_id, user_id,
+    )
+    payload = {
+        "member": {
+            "chat_id": member["chat_id"],
+            "chat_title": member["chat_title"],
+            "user_id": member["user_id"],
+            "username": member["username"],
+            "display_name": member["display_name"],
+            "message_count": member["message_count"],
+            "warning_count": member["warning_count"],
+            "role_title": member["role_title"],
+            "priority": member["priority"],
+            "first_seen_at": member["first_seen_at"].isoformat(),
+        },
+        "events": [{
+            "actor_id": row["actor_id"],
+            "action": row["action"],
+            "details": row["details"],
+            "created_at": row["created_at"].isoformat(),
+        } for row in events],
+    }
+    return _panel_cors(request, web.json_response(payload))
+
+
 async def panel_assign_member_role(request: web.Request) -> web.Response:
     actor_id = await _panel_require_owner(request)
     try:
@@ -739,6 +804,7 @@ async def start_web_server(port: int, bot: Bot) -> web.AppRunner:
     app.router.add_get("/api/dashboard", panel_dashboard)
     app.router.add_get("/api/moderation", panel_moderation)
     app.router.add_get("/api/people", panel_people)
+    app.router.add_get("/api/members/{chat_id:-[0-9]+}/{user_id:[0-9]+}/history", panel_member_history)
     app.router.add_post("/api/members/role", panel_assign_member_role)
     app.router.add_post("/api/members/role/remove", panel_remove_member_role)
     app.router.add_post("/api/reports/{report_id:[0-9]+}/close", panel_close_report)
