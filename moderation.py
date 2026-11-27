@@ -90,6 +90,8 @@ async def _can_manage_target(message: Message, bot: Bot, owner_id: int, target_i
             target_rank = max(target_rank, 60)
     except Exception:
         pass
+    if await database.is_custom_moderator(message.chat.id, actor_id):
+        actor_rank = max(actor_rank, 30)
     if await database.is_custom_moderator(message.chat.id, target_id):
         target_rank = max(target_rank, 30)
 
@@ -238,9 +240,7 @@ async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
                 permissions=ChatPermissions(can_send_messages=False),
                 until_date=int(time.time()) + 300,
             )
-            if not await _can_manage_target(message, bot, owner_id, target.id):
-        return
-    await database.reset_warnings(message.chat.id, target.id)
+            await database.reset_warnings(message.chat.id, target.id)
             await database.log_moderation_event(
                 message.chat.id, message.from_user.id, target.id, "auto_mute", "5 минут после 3 предупреждений"
             )
@@ -471,6 +471,8 @@ async def clear_warnings(message: Message, bot: Bot, owner_id: int) -> None:
     target = await _get_moderation_target(message, bot)
     if target is None:
         await message.reply("Ответьте на сообщение участника или укажите ID: /clearwarns 123456.")
+        return
+    if not await _can_manage_target(message, bot, owner_id, target.id):
         return
     await database.reset_warnings(message.chat.id, target.id)
     await database.log_moderation_event(message.chat.id, message.from_user.id, target.id, "warnings_reset")
