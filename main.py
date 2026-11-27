@@ -1451,12 +1451,14 @@ async def main() -> None:
     bot = Bot(token=token)
     dispatcher = create_dispatcher()
     runner: web.AppRunner | None = None
+    polling_lock_connection: asyncpg.Connection | None = None
 
     try:
         await database.connect()
         await ensure_support_schema()
         LOGGER.info("PostgreSQL connection established; support schema ready")
         runner = await start_web_server(port, bot)
+        polling_lock_connection = await acquire_telegram_polling_lock()
         await bot.delete_webhook(drop_pending_updates=True)
         await bot.set_my_commands([
             BotCommand(command="start", description="Открыть главное меню"),
@@ -1527,6 +1529,9 @@ async def main() -> None:
     finally:
         if runner is not None:
             await runner.cleanup()
+        if polling_lock_connection is not None:
+            await polling_lock_connection.close()
+            LOGGER.info("Telegram polling advisory lock released")
         await database.close()
         await bot.session.close()
 
