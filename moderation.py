@@ -140,7 +140,9 @@ async def _get_moderation_target(message: Message, bot: Bot):
     """Resolve a target from a replied-to message or a numeric Telegram ID."""
     if message.reply_to_message and message.reply_to_message.from_user:
         return message.reply_to_message.from_user
-    raw_id = (message.text or "").strip()
+    raw_text = (message.text or "").strip()
+    raw_parts = raw_text.split(maxsplit=1)
+    raw_id = raw_parts[1].strip() if raw_text.startswith("/") and len(raw_parts) > 1 else raw_text
     try:
         target_id = int(raw_id)
     except (TypeError, ValueError):
@@ -208,9 +210,9 @@ async def mute_member(message: Message, bot: Bot, owner_id: int) -> None:
     if not await is_moderator(message, bot, owner_id):
         await message.reply("⛔ Команда доступна только владельцу и администраторам группы.")
         return
-    target = message.reply_to_message.from_user if message.reply_to_message else None
+    target = await _get_moderation_target(message, bot)
     if target is None or target.is_bot or target.id == owner_id:
-        await message.reply("Ответь на сообщение участника или отправь его Telegram ID.")
+        await message.reply("Ответь на сообщение участника или укажи его Telegram ID: /mute 123456.")
         return
     if await is_chat_admin(bot, message.chat.id, target.id):
         await message.reply("Нельзя ограничить администратора группы.")
@@ -239,9 +241,9 @@ async def unmute_member(message: Message, bot: Bot, owner_id: int) -> None:
     if not await is_moderator(message, bot, owner_id):
         await message.reply("⛔ Команда доступна только владельцу и администраторам группы.")
         return
-    target = message.reply_to_message.from_user if message.reply_to_message else None
+    target = await _get_moderation_target(message, bot)
     if target is None:
-        await message.reply("Ответь на сообщение участника или отправь его Telegram ID.")
+        await message.reply("Ответь на сообщение участника или укажи его Telegram ID: /unmute 123456.")
         return
     try:
         await bot.restrict_chat_member(
