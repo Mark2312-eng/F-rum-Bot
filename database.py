@@ -731,6 +731,8 @@ class Database:
         self, chat_id: int, user_id: int, role_key: str, actor_id: int,
         actor_priority: int,
     ) -> bool:
+        if actor_priority < 80 or user_id == actor_id:
+            return False
         pool = self._require_pool()
         async with pool.acquire() as connection:
             async with connection.transaction():
@@ -830,6 +832,8 @@ class Database:
     async def remove_chat_role_guarded(
         self, chat_id: int, user_id: int, actor_id: int, actor_priority: int,
     ) -> bool:
+        if actor_priority < 80 or user_id == actor_id:
+            return False
         pool = self._require_pool()
         async with pool.acquire() as connection:
             async with connection.transaction():
