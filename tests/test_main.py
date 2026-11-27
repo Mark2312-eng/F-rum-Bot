@@ -5,6 +5,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 
+from moderation import (
+    _flood_notice_times,
+    _message_times,
+    cleanup_flood_state,
+    should_notify_flood,
+)
+
 from main import (
     build_main_keyboard,
     build_section_keyboard,
@@ -16,6 +23,10 @@ from main import (
     format_forum_date,
     get_forum_url,
     get_port,
+    PENDING_INPUTS,
+    has_pending_input,
+    pop_pending_input,
+    set_pending_input,
 )
 
 
@@ -146,6 +157,66 @@ class ProfileFormattingTests(unittest.TestCase):
             if button.callback_data
         }
         self.assertIn("owner_panel", owner_callbacks)
+
+
+
+class PendingInputSecurityTests(unittest.TestCase):
+    def setUp(self):
+        PENDING_INPUTS.clear()
+
+    def tearDown(self):
+        PENDING_INPUTS.clear()
+
+    def test_pending_input_is_scoped_to_chat_and_user_and_consumed_once(self):
+        set_pending_input(-1001, 42, "profile")
+
+        self.assertTrue(has_pending_input(-1001, 42))
+        self.assertFalse(has_pending_input(-1002, 42))
+        self.assertIsNone(pop_pending_input(-1002, 42))
+        self.assertEqual(pop_pending_input(-1001, 42), "profile")
+        self.assertIsNone(pop_pending_input(-1001, 42))
+
+    def test_expired_pending_input_is_rejected(self):
+        from unittest.mock import patch
+
+        with patch("main.time.monotonic", return_value=100.0):
+            set_pending_input(-1001, 42, "mod_warn")
+        with patch("main.time.monotonic", return_value=401.0):
+            self.assertFalse(has_pending_input(-1001, 42))
+            self.assertIsNone(pop_pending_input(-1001, 42))
+
+
+
+class FloodProtectionTests(unittest.TestCase):
+    def setUp(self):
+        _message_times.clear()
+        _flood_notice_times.clear()
+        import moderation
+        moderation._last_flood_sweep = 0.0
+
+    def tearDown(self):
+        _message_times.clear()
+        _flood_notice_times.clear()
+
+    def test_flood_notices_are_throttled_per_chat_and_user(self):
+        key = (-1001, 42)
+        self.assertTrue(should_notify_flood(key, 100.0))
+        self.assertFalse(should_notify_flood(key, 110.0))
+        self.assertTrue(should_notify_flood(key, 131.0))
+        self.assertTrue(should_notify_flood((-1002, 42), 131.0))
+
+    def test_flood_state_cleanup_removes_inactive_users(self):
+        import moderation
+        _message_times[(-1001, 42)].extend([1.0, 2.0])
+        _message_times[(-1002, 43)].append(99.0)
+        _flood_notice_times[(-1001, 42)] = 1.0
+        moderation._last_flood_sweep = 1.0
+
+        cleanup_flood_state(100.0)
+
+        self.assertNotIn((-1001, 42), _message_times)
+        self.assertIn((-1002, 43), _message_times)
+        self.assertNotIn((-1001, 42), _flood_notice_times)
 
 
 class XenForoApiTests(unittest.IsolatedAsyncioTestCase):

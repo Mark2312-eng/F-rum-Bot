@@ -18,8 +18,8 @@ async def _allowed(message: Message, bot: Bot, owner_id: int) -> bool:
         return False
     if message.from_user.id == owner_id:
         return True
-    member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-    authorized = member.status in {"administrator", "creator"}
+    from moderation import is_chat_admin
+    authorized = await is_chat_admin(bot, message.chat.id, message.from_user.id)
     if not authorized:
         authorized = await database.get_chat_member_priority(message.chat.id, message.from_user.id) >= 20
     if not authorized:
@@ -89,10 +89,11 @@ async def reportclose_command(message: Message, bot: Bot, owner_id: int) -> None
 async def blacklist_command(message: Message, bot: Bot, owner_id: int) -> None:
     if not await _allowed(message, bot, owner_id):
         return
-    member = await bot.get_chat_member(message.chat.id, message.from_user.id)
+    from moderation import is_chat_admin
+    telegram_admin = await is_chat_admin(bot, message.chat.id, message.from_user.id)
     from system_roles import has_permission
     can_manage_globally = await has_permission(message.from_user.id, owner_id, "staff_manage")
-    if message.from_user.id != owner_id and member.status not in {"administrator", "creator"} and not can_manage_globally:
+    if message.from_user.id != owner_id and not telegram_admin and not can_manage_globally:
         await message.reply("⛔ Общий чёрный список доступен владельцу, администраторам Telegram и руководству бота.")
         return
     parts = (message.text or "").split(maxsplit=2)

@@ -19,6 +19,37 @@ LINK_POLICIES = {"allow", "block", "mute"}
 WARNING_LIMIT = 3
 
 _message_times: dict[tuple[int, int], deque[float]] = defaultdict(deque)
+_flood_notice_times: dict[tuple[int, int], float] = {}
+_last_flood_sweep = 0.0
+FLOOD_NOTICE_COOLDOWN_SECONDS = 30
+FLOOD_STATE_SWEEP_SECONDS = 60
+
+
+def cleanup_flood_state(now: float) -> None:
+    """Bound in-memory flood tracking by dropping inactive users periodically."""
+    global _last_flood_sweep
+    if now - _last_flood_sweep < FLOOD_STATE_SWEEP_SECONDS:
+        return
+    _last_flood_sweep = now
+    stale_before = now - FLOOD_WINDOW_SECONDS
+    for key, history in list(_message_times.items()):
+        while history and history[0] <= stale_before:
+            history.popleft()
+        if not history:
+            _message_times.pop(key, None)
+    notice_stale_before = now - FLOOD_NOTICE_COOLDOWN_SECONDS
+    for key, notified_at in list(_flood_notice_times.items()):
+        if notified_at <= notice_stale_before:
+            _flood_notice_times.pop(key, None)
+
+
+def should_notify_flood(key: tuple[int, int], now: float) -> bool:
+    """Throttle repeated flood warnings per user and chat."""
+    last_notice = _flood_notice_times.get(key)
+    if last_notice is not None and now - last_notice < FLOOD_NOTICE_COOLDOWN_SECONDS:
+        return False
+    _flood_notice_times[key] = now
+    return True
 
 
 def is_group(message: Message) -> bool:
@@ -83,12 +114,19 @@ async def _can_manage_target(message: Message, bot: Bot, owner_id: int, target_i
     target_rank = max(target_rank, role_rank(await get_role(target_id, owner_id)))
     try:
         target_member = await bot.get_chat_member(message.chat.id, target_id)
-        if target_member.status == "creator":
-            target_rank = max(target_rank, 100)
-        elif target_member.status == "administrator":
-            target_rank = max(target_rank, 60)
     except Exception:
-        pass
+        # Never apply a moderation action when Telegram cannot confirm the
+        # target's current status. This protects admins during API outages.
+        await message.reply(
+            "⚠️ Не удалось проверить статус участника через Telegram. "
+            "Действие отменено; попробуйте позже."
+        )
+        return False
+
+    if target_member.status == "creator":
+        target_rank = max(target_rank, 100)
+    elif target_member.status == "administrator":
+        target_rank = max(target_rank, 60)
 
     if await database.is_chat_member_immune(message.chat.id, target_id) and actor_rank < 100:
         await message.reply("🛡 Этот участник защищён иммунитетом /gm.")
@@ -170,6 +208,7 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
 
     key = (message.chat.id, message.from_user.id)
     now = time.monotonic()
+    cleanup_flood_state(now)
     history = _message_times[key]
     while history and now - history[0] > FLOOD_WINDOW_SECONDS:
         history.popleft()
@@ -180,10 +219,11 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
             await database.log_moderation_event(
                 message.chat.id, None, message.from_user.id, "flood_delete"
             )
-            await message.answer(
-                f"⏳ {message.from_user.mention_html()}, слишком много сообщений подряд. Сделай небольшую паузу.",
-                parse_mode="HTML",
-            )
+            if should_notify_flood(key, now):
+                await message.answer(
+                    f"⏳ {message.from_user.mention_html()}, слишком много сообщений подряд. Сделай небольшую паузу.",
+                    parse_mode="HTML",
+                )
         except Exception:
             return
 
@@ -475,6 +515,89 @@ async def clear_warnings(message: Message, bot: Bot, owner_id: int) -> None:
     await database.reset_warnings(message.chat.id, target.id)
     await database.log_moderation_event(message.chat.id, message.from_user.id, target.id, "warnings_reset")
     await message.answer(f"✅ Предупреждения пользователя <code>{target.id}</code> сброшены.", parse_mode="HTML")
+
+
+async def show_warning_history(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    target = await _get_moderation_target(message, bot)
+    if target is None:
+        await message.reply("Ответьте на сообщение участника или укажите ID: /warnhistory 123456.")
+        return
+    events = await database.get_moderation_events_for_target(
+        message.chat.id, target.id, ["warning", "auto_mute", "warnings_reset"], 20,
+    )
+    if not events:
+        await message.answer(f"📜 История предупреждений <code>{target.id}</code> пуста.", parse_mode="HTML")
+        return
+    labels = {"warning": "Предупреждение", "auto_mute": "Автоматическое ограничение", "warnings_reset": "Сброс предупреждений"}
+    lines = [f"📜 <b>История предупреждений</b> · <code>{target.id}</code>", ""]
+    for event in events:
+        stamp = event["created_at"]
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        when = stamp.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+        detail = f" · {escape(str(event['details']))}" if event["details"] else ""
+        actor = f" · модератор <code>{event['actor_id']}</code>" if event["actor_id"] else ""
+        lines.append(f"• {labels.get(event['action'], 'Событие')}{detail}{actor}\n  <i>{when}</i>")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+async def show_warning_list(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    rows = await database.get_warned_members(message.chat.id, 30)
+    if not rows:
+        await message.answer("⚠️ Участников с активными предупреждениями нет.")
+        return
+    lines = ["⚠️ <b>Участники с предупреждениями</b>", ""]
+    for row in rows:
+        lines.append(f"• <code>{row['user_id']}</code> — <b>{row['warning_count']}/{WARNING_LIMIT}</b>")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+async def show_ban_list(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    rows = await database.get_logged_bans(message.chat.id, 30)
+    active = [row for row in rows if row["action"] == "ban"]
+    if not active:
+        await message.answer("⛔ В журнале бота нет активных блокировок.")
+        return
+    lines = ["⛔ <b>Блокировки, зарегистрированные ботом</b>", ""]
+    for row in active:
+        stamp = row["created_at"]
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        when = stamp.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+        lines.append(f"• <code>{row['target_id']}</code> · {when}")
+    lines.append("\n<i>Список основан на журнале действий бота, а не на полном списке Telegram.</i>")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+async def show_ban_info(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    target = await _get_moderation_target(message, bot)
+    if target is None:
+        await message.reply("Ответьте на сообщение участника или укажите ID: /baninfo 123456.")
+        return
+    events = await database.get_moderation_events_for_target(
+        message.chat.id, target.id, ["ban", "unban"], 10,
+    )
+    if not events:
+        await message.answer(f"⛔ В журнале бота нет сведений о блокировках <code>{target.id}</code>.", parse_mode="HTML")
+        return
+    latest = events[0]
+    stamp = latest["created_at"]
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    when = stamp.astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+    state = "🔴 Заблокирован (по журналу бота)" if latest["action"] == "ban" else "🟢 Разблокирован (по журналу бота)"
+    lines = [f"⛔ <b>Информация о блокировке</b>", f"ID: <code>{target.id}</code>", state, f"Последнее действие: {when}"]
+    if latest["details"]:
+        lines.append(f"Причина/детали: {escape(str(latest['details']))}")
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 async def show_moderation_stats(message: Message, bot: Bot, owner_id: int) -> None:

@@ -79,6 +79,8 @@ class Database:
                     ADD COLUMN IF NOT EXISTS moderation_mode TEXT NOT NULL DEFAULT 'balanced';
                 ALTER TABLE registered_chats
                     ADD COLUMN IF NOT EXISTS link_policy TEXT NOT NULL DEFAULT 'block';
+                ALTER TABLE registered_chats
+                    ADD COLUMN IF NOT EXISTS group_rules TEXT NOT NULL DEFAULT '';
                 CREATE TABLE IF NOT EXISTS moderation_warnings (
                     chat_id BIGINT NOT NULL,
                     user_id BIGINT NOT NULL,
@@ -114,6 +116,26 @@ class Database:
                     nickname TEXT NOT NULL CHECK (char_length(nickname) BETWEEN 1 AND 32),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (chat_id, user_id)
                 );
+                CREATE TABLE IF NOT EXISTS chat_member_activity (
+                    chat_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    username TEXT,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    message_count BIGINT NOT NULL DEFAULT 0 CHECK (message_count >= 0),
+                    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    join_event_seen BOOLEAN NOT NULL DEFAULT FALSE,
+                    invited_by BIGINT,
+                    PRIMARY KEY (chat_id, user_id)
+                );
+                CREATE TABLE IF NOT EXISTS chat_member_daily_activity (
+                    chat_id BIGINT NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    activity_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                    message_count BIGINT NOT NULL DEFAULT 0 CHECK (message_count >= 0),
+                    PRIMARY KEY (chat_id, user_id, activity_date)
+                );
+                CREATE INDEX IF NOT EXISTS chat_member_activity_rank_idx
+                    ON chat_member_activity (chat_id, message_count DESC);
                 CREATE TABLE IF NOT EXISTS chat_moderators (
                     chat_id BIGINT NOT NULL, user_id BIGINT NOT NULL, assigned_by BIGINT NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (chat_id, user_id)
@@ -305,6 +327,21 @@ class Database:
             raise ValueError("Chat is not registered")
         return {"moderation_mode": row["moderation_mode"], "link_policy": row["link_policy"]}
 
+    async def get_chat_rules(self, chat_id: int) -> str:
+        pool = self._require_pool()
+        value = await pool.fetchval(
+            "SELECT group_rules FROM registered_chats WHERE chat_id = $1",
+            chat_id,
+        )
+        return str(value or "")
+
+    async def set_chat_rules(self, chat_id: int, rules: str) -> None:
+        pool = self._require_pool()
+        await pool.execute(
+            "UPDATE registered_chats SET group_rules = $2 WHERE chat_id = $1",
+            chat_id, rules[:3500],
+        )
+
     async def update_chat_setting(self, chat_id: int, setting: str, value: str) -> None:
         allowed = {
             "moderation_mode": {"off", "balanced", "strict"},
@@ -377,6 +414,147 @@ class Database:
             chat_id, user_id,
         )
         return int(value or 0)
+
+    async def ensure_chat_member_stats(
+        self, chat_id: int, user_id: int, username: str | None, display_name: str,
+    ) -> None:
+        pool = self._require_pool()
+        await pool.execute(
+            """INSERT INTO chat_member_activity (chat_id, user_id, username, display_name)
+               VALUES ($1, $2, $3, $4)
+               ON CONFLICT (chat_id, user_id) DO UPDATE
+               SET username = EXCLUDED.username, display_name = EXCLUDED.display_name""",
+            chat_id, user_id, username, display_name[:160],
+        )
+
+    async def record_chat_message(
+        self, chat_id: int, user_id: int, username: str | None, display_name: str,
+    ) -> None:
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """INSERT INTO chat_member_activity
+                           (chat_id, user_id, username, display_name, message_count)
+                       SELECT $1, $2, $3, $4, 1
+                       WHERE EXISTS (SELECT 1 FROM registered_chats WHERE chat_id = $1)
+                       ON CONFLICT (chat_id, user_id) DO UPDATE
+                       SET username = EXCLUDED.username,
+                           display_name = EXCLUDED.display_name,
+                           message_count = chat_member_activity.message_count + 1""",
+                    chat_id, user_id, username, display_name[:160],
+                )
+                await connection.execute(
+                    """INSERT INTO chat_member_daily_activity
+                           (chat_id, user_id, activity_date, message_count)
+                       SELECT $1, $2, CURRENT_DATE, 1
+                       WHERE EXISTS (SELECT 1 FROM registered_chats WHERE chat_id = $1)
+                       ON CONFLICT (chat_id, user_id, activity_date) DO UPDATE
+                       SET message_count = chat_member_daily_activity.message_count + 1""",
+                    chat_id, user_id,
+                )
+
+    async def record_chat_member_join(
+        self, chat_id: int, user_id: int, username: str | None,
+        display_name: str, joined_at, invited_by: int | None,
+    ) -> None:
+        pool = self._require_pool()
+        await pool.execute(
+            """INSERT INTO chat_member_activity
+                   (chat_id, user_id, username, display_name, first_seen_at, join_event_seen, invited_by)
+               SELECT $1, $2, $3, $4, $5, TRUE, $6
+               WHERE EXISTS (SELECT 1 FROM registered_chats WHERE chat_id = $1)
+               ON CONFLICT (chat_id, user_id) DO UPDATE
+               SET username = EXCLUDED.username,
+                   display_name = EXCLUDED.display_name,
+                   join_event_seen = TRUE,
+                   invited_by = COALESCE(chat_member_activity.invited_by, EXCLUDED.invited_by)""",
+            chat_id, user_id, username, display_name[:160], joined_at, invited_by,
+        )
+
+    async def get_chat_member_stats(self, chat_id: int, user_id: int):
+        pool = self._require_pool()
+        return await pool.fetchrow(
+            """WITH ranked AS (
+                   SELECT user_id, RANK() OVER (ORDER BY message_count DESC) AS activity_rank
+                   FROM chat_member_activity WHERE chat_id = $1
+               )
+               SELECT a.message_count, a.first_seen_at, a.join_event_seen, a.invited_by,
+                      COALESCE(d.message_count, 0) AS today_count,
+                      COALESCE(w.warning_count, 0) AS warning_count,
+                      n.nickname, r.activity_rank
+               FROM chat_member_activity a
+               LEFT JOIN chat_member_daily_activity d
+                 ON d.chat_id = a.chat_id AND d.user_id = a.user_id
+                AND d.activity_date = CURRENT_DATE
+               LEFT JOIN moderation_warnings w
+                 ON w.chat_id = a.chat_id AND w.user_id = a.user_id
+               LEFT JOIN chat_nicknames n
+                 ON n.chat_id = a.chat_id AND n.user_id = a.user_id
+               LEFT JOIN ranked r ON r.user_id = a.user_id
+               WHERE a.chat_id = $1 AND a.user_id = $2""",
+            chat_id, user_id,
+        )
+
+    async def get_chat_member_role_title(self, chat_id: int, user_id: int) -> str | None:
+        pool = self._require_pool()
+        return await pool.fetchval(
+            """SELECT d.title FROM chat_member_roles m
+               JOIN chat_role_definitions d
+                 ON d.chat_id = m.chat_id AND d.role_key = m.role_key
+               WHERE m.chat_id = $1 AND m.user_id = $2""",
+            chat_id, user_id,
+        )
+
+    async def get_moderation_events_for_target(
+        self, chat_id: int, user_id: int, actions: list[str] | None = None, limit: int = 20,
+    ) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        safe_limit = max(1, min(int(limit), 50))
+        if actions:
+            return await pool.fetch(
+                """SELECT actor_id, target_id, action, details, created_at
+                   FROM moderation_events
+                   WHERE chat_id = $1 AND target_id = $2 AND action = ANY($3::text[])
+                   ORDER BY created_at DESC, id DESC LIMIT $4""",
+                chat_id, user_id, actions, safe_limit,
+            )
+        return await pool.fetch(
+            """SELECT actor_id, target_id, action, details, created_at
+               FROM moderation_events
+               WHERE chat_id = $1 AND target_id = $2
+               ORDER BY created_at DESC, id DESC LIMIT $3""",
+            chat_id, user_id, safe_limit,
+        )
+
+    async def get_warned_members(self, chat_id: int, limit: int = 30) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        safe_limit = max(1, min(int(limit), 50))
+        return await pool.fetch(
+            """SELECT user_id, warning_count, updated_at
+               FROM moderation_warnings
+               WHERE chat_id = $1 AND warning_count > 0
+               ORDER BY warning_count DESC, updated_at DESC
+               LIMIT $2""",
+            chat_id, safe_limit,
+        )
+
+    async def get_logged_bans(self, chat_id: int, limit: int = 30) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        safe_limit = max(1, min(int(limit), 50))
+        return await pool.fetch(
+            """SELECT target_id, action, details, created_at
+               FROM (
+                   SELECT DISTINCT ON (target_id) target_id, action, details, created_at, id
+                   FROM moderation_events
+                   WHERE chat_id = $1 AND target_id IS NOT NULL
+                     AND action IN ('ban', 'unban')
+                   ORDER BY target_id, created_at DESC, id DESC
+               ) latest
+               ORDER BY created_at DESC
+               LIMIT $2""",
+            chat_id, safe_limit,
+        )
 
     async def get_moderation_stats(self, chat_id: int) -> list[asyncpg.Record]:
         pool = self._require_pool()
@@ -627,6 +805,17 @@ class Database:
                ORDER BY priority DESC, title""", chat_id
         )
 
+    async def get_chat_role_audit(self, chat_id: int, limit: int = 30):
+        pool = self._require_pool()
+        safe_limit = max(1, min(int(limit), 50))
+        return await pool.fetch(
+            """SELECT actor_id, target_id, action, details, created_at
+               FROM chat_role_audit
+               WHERE chat_id = $1
+               ORDER BY created_at DESC, id DESC
+               LIMIT $2""", chat_id, safe_limit
+        )
+
     async def get_chat_member_role(self, chat_id: int, user_id: int):
         pool = self._require_pool()
         return await pool.fetchrow(
@@ -731,6 +920,8 @@ class Database:
         self, chat_id: int, user_id: int, role_key: str, actor_id: int,
         actor_priority: int,
     ) -> bool:
+        if actor_priority < 80 or user_id == actor_id:
+            return False
         pool = self._require_pool()
         async with pool.acquire() as connection:
             async with connection.transaction():
@@ -830,6 +1021,8 @@ class Database:
     async def remove_chat_role_guarded(
         self, chat_id: int, user_id: int, actor_id: int, actor_priority: int,
     ) -> bool:
+        if actor_priority < 80 or user_id == actor_id:
+            return False
         pool = self._require_pool()
         async with pool.acquire() as connection:
             async with connection.transaction():
@@ -919,6 +1112,16 @@ class Database:
                     chat_id, actor_id, f"{command_name.lower()}:{min_priority}",
                 )
         return True
+
+    async def get_chat_command_permissions(self, chat_id: int) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        return await pool.fetch(
+            """SELECT command_name, min_priority, updated_by, updated_at
+               FROM chat_command_permissions
+               WHERE chat_id = $1
+               ORDER BY command_name""",
+            chat_id,
+        )
 
     async def get_chat_command_priority(self, chat_id: int, command_name: str) -> int | None:
         pool = self._require_pool()

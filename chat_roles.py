@@ -14,10 +14,14 @@ DEFAULT_COMMAND_PRIORITIES = {
     "mute": 20, "unmute": 20, "kick": 20,
     "ban": 40, "unban": 40, "purge": 40,
     "modstats": 20, "modlog": 20,
+    "warnhistory": 20, "warnlist": 20, "banlist": 40, "baninfo": 20,
+    "admins": 0, "chatinfo": 0, "rules": 0, "setrules": 60, "rolelog": 80,
     "reports": 20, "reportclose": 40, "role": 60, "nick": 40, "blacklist": 80,
 }
 MANAGEABLE_COMMANDS = set(DEFAULT_COMMAND_PRIORITIES) | {
     "reports", "reportclose", "role", "nick", "blacklist",
+    "warnhistory", "warnlist", "banlist", "baninfo",
+    "admins", "chatinfo", "rules", "setrules", "rolelog",
 }
 
 
@@ -151,6 +155,9 @@ async def set_chat_role_command(message: Message, owner_id: int) -> None:
     if not message.from_user:
         return
     actor_priority = await effective_chat_priority(message, owner_id)
+    if actor_priority < 80:
+        await message.reply("⛔ Назначать роли могут только сотрудники с приоритетом 80+.")
+        return
     parts = (message.text or "").split(maxsplit=2)
     if len(parts) != 3 or not parts[1].isdigit():
         await message.reply("Формат: /chatrole TELEGRAM_ID КЛЮЧ_ИЛИ_НАЗВАНИЕ_РОЛИ.")
@@ -188,12 +195,27 @@ async def remove_chat_role_command(message: Message, owner_id: int) -> None:
     if not message.from_user:
         return
     actor_priority = await effective_chat_priority(message, owner_id)
+    if actor_priority < 80:
+        await message.reply("⛔ Снимать роли могут только сотрудники с приоритетом 80+.")
+        return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit():
         await message.reply("Формат: /removerole TELEGRAM_ID.")
         return
+    target_id = int(parts[1])
+    if target_id == message.from_user.id:
+        await message.reply("Нельзя снять роль самому себе.")
+        return
+    try:
+        target_member = await message.bot.get_chat_member(message.chat.id, target_id)
+        if target_member.status in {"creator", "administrator"}:
+            await message.reply("Нельзя снимать роли владельца и администраторов Telegram.")
+            return
+    except Exception:
+        await message.reply("Не удалось проверить участника. Действие отменено.")
+        return
     removed = await database.remove_chat_role_guarded(
-        message.chat.id, int(parts[1]), message.from_user.id, actor_priority
+        message.chat.id, target_id, message.from_user.id, actor_priority
     )
     await message.answer("✅ Роль снята." if removed else "⛔ Нельзя снять роль равного/старшего сотрудника или роль отсутствует.")
 
@@ -218,6 +240,22 @@ async def editcmd_command(message: Message, owner_id: int) -> None:
         f"✅ Для /{command} установлен минимальный приоритет {minimum}."
         if updated else "⛔ Минимальный приоритет должен быть от 0 до 100 и ниже вашего."
     )
+
+
+async def command_permissions_command(message: Message, owner_id: int) -> None:
+    actor_priority = await _group_and_actor(message, message.bot, owner_id)
+    if actor_priority is None:
+        return
+    rows = await database.get_chat_command_permissions(message.chat.id)
+    configured = {row["command_name"]: int(row["min_priority"]) for row in rows}
+    lines = ["⚙️ <b>Права на команды</b>", "Приоритет 0 — доступно всем; 100 — только владелец."]
+    for name in sorted(MANAGEABLE_COMMANDS):
+        minimum = configured.get(name, DEFAULT_COMMAND_PRIORITIES.get(name, 0))
+        suffix = " (настройка)" if name in configured else " (по умолчанию)"
+        lines.append(f"• /{escape(name)} — {minimum}{suffix}")
+    lines.append("")
+    lines.append("Изменить: /editcmd КОМАНДА ПРИОРИТЕТ")
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 async def gm_command(message: Message, owner_id: int) -> None:
@@ -248,6 +286,37 @@ async def gm_command(message: Message, owner_id: int) -> None:
         f"🛡 Иммунитет для <code>{target_id}</code> {'включён' if enabled else 'снят'}."
         if changed else "⛔ Нельзя менять иммунитет равному/старшему сотруднику."
     )
+
+
+async def rolelog_command(message: Message, owner_id: int) -> None:
+    actor_priority = await _group_and_actor(message, message.bot, owner_id)
+    if actor_priority is None:
+        return
+    rows = await database.get_chat_role_audit(message.chat.id, 30)
+    if not rows:
+        await message.answer("📜 История изменений ролей пока пуста.")
+        return
+    labels = {
+        "assign_role": "Назначение роли",
+        "remove_role": "Снятие роли",
+        "create_role": "Создание роли",
+        "delete_role": "Удаление роли",
+        "set_immunity": "Изменение иммунитета",
+        "set_command_permission": "Изменение прав команды",
+    }
+    lines = ["📜 <b>История управления ролями</b>", ""]
+    for row in rows:
+        stamp = row["created_at"]
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=__import__("datetime").timezone.utc)
+        when = stamp.strftime("%d.%m.%Y %H:%M UTC")
+        target = f" → <code>{row['target_id']}</code>" if row["target_id"] else ""
+        detail = f" · {escape(str(row['details']))}" if row["details"] else ""
+        lines.append(
+            f"• {labels.get(row['action'], row['action'])}{target}{detail}\n"
+            f"  инициатор <code>{row['actor_id']}</code> · <i>{when}</i>"
+        )
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 async def command_priority_allowed(message: Message, owner_id: int, command_name: str) -> bool:
