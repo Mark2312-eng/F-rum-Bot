@@ -32,6 +32,8 @@ from support_system import ensure_support_schema, register_support_routes, regis
 from privacy_broadcast import ensure_privacy_schema, has_consent, has_subscription_choice, show_consent_prompt, show_subscription_prompt, register_privacy_broadcast_handlers
 from vip_stars import ensure_vip_schema, register_vip_handlers
 from community_events import ensure_events_schema, register_events_poll_handlers
+from staff_role_catalog import DEPARTMENT_TITLES, ROLE_CATALOG
+from system_roles import ROLES as SYSTEM_ROLE_DEFINITIONS
 
 load_dotenv()
 
@@ -529,14 +531,20 @@ async def panel_moderation(request: web.Request) -> web.Response:
 
 
 async def panel_system_staff(request: web.Request) -> web.Response:
-    """Return the global staff roster and assignment audit to the owner."""
+    """Return the global staff roster, role catalogue and audit to the owner."""
     owner_id = await _panel_require_owner(request)
     staff = await database.list_system_staff()
     history = await database.get_system_staff_log(limit=100)
+    roles = [{
+        "key": role.key, "title": role.title, "department": role.department,
+        "department_title": DEPARTMENT_TITLES.get(role.department, "Прочие должности"),
+        "rank": role.rank, "permissions": sorted(role.permissions),
+    } for role in ROLE_CATALOG.values()]
     return _panel_cors(request, web.json_response({
-        "owner_id": owner_id,
+        "owner_id": owner_id, "roles": roles, "departments": DEPARTMENT_TITLES,
         "staff": [{
             "user_id": row["user_id"], "role_key": row["role_key"],
+            "role_title": ROLE_CATALOG[row["role_key"]].title if row["role_key"] in ROLE_CATALOG else SYSTEM_ROLE_DEFINITIONS.get(row["role_key"], {}).get("title", row["role_key"]),
             "assigned_by": row["assigned_by"], "assigned_at": row["assigned_at"].isoformat(),
         } for row in staff],
         "history": [{
@@ -545,6 +553,45 @@ async def panel_system_staff(request: web.Request) -> web.Response:
             "created_at": row["created_at"].isoformat(),
         } for row in history],
     }))
+
+
+async def panel_assign_system_staff(request: web.Request) -> web.Response:
+    """Assign a catalogue role using the same atomic hierarchy guard as bot commands."""
+    actor_id = await _panel_require_owner(request)
+    try:
+        data = await request.json()
+        target_id = int(data.get("user_id", 0)) if isinstance(data, dict) else 0
+        requested_role = str(data.get("role_key", "")).strip() if isinstance(data, dict) else ""
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Передайте корректный Telegram ID и должность.")
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if target_id <= 0 or target_id == owner_id or target_id == actor_id:
+        raise web.HTTPBadRequest(text="Нельзя назначить должность владельцу, себе или некорректному ID.")
+    if requested_role not in ROLE_CATALOG:
+        raise web.HTTPBadRequest(text="Выберите должность из каталога.")
+    role_ranks = {key: value["rank"] for key, value in SYSTEM_ROLE_DEFINITIONS.items()}
+    assigned = await database.assign_system_role_guarded(target_id, requested_role, actor_id, owner_id, role_ranks)
+    if not assigned:
+        return _panel_cors(request, web.json_response({"error": "Назначение отклонено: проверьте иерархию должностей."}, status=409))
+    return _panel_cors(request, web.json_response({"ok": True, "user_id": target_id, "role_key": requested_role}))
+
+
+async def panel_remove_system_staff(request: web.Request) -> web.Response:
+    """Remove a global staff role without bypassing rank protections."""
+    actor_id = await _panel_require_owner(request)
+    try:
+        data = await request.json()
+        target_id = int(data.get("user_id", 0)) if isinstance(data, dict) else 0
+    except (ValueError, TypeError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Передайте корректный Telegram ID.")
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if target_id <= 0 or target_id in {owner_id, actor_id}:
+        raise web.HTTPBadRequest(text="Нельзя снять должность владельца, себе или некорректному ID.")
+    role_ranks = {key: value["rank"] for key, value in SYSTEM_ROLE_DEFINITIONS.items()}
+    removed = await database.remove_system_role_guarded(target_id, actor_id, owner_id, role_ranks)
+    if not removed:
+        return _panel_cors(request, web.json_response({"error": "Снятие отклонено: сотрудник не найден или защищён иерархией."}, status=409))
+    return _panel_cors(request, web.json_response({"ok": True, "user_id": target_id}))
 
 
 async def panel_global_blacklist_history(request: web.Request) -> web.Response:
@@ -863,6 +910,8 @@ async def start_web_server(port: int, bot: Bot) -> web.AppRunner:
     app.router.add_get("/api/moderation", panel_moderation)
     app.router.add_get("/api/blacklist/history", panel_global_blacklist_history)
     app.router.add_get("/api/system/staff", panel_system_staff)
+    app.router.add_post("/api/system/staff", panel_assign_system_staff)
+    app.router.add_post("/api/system/staff/remove", panel_remove_system_staff)
     app.router.add_get("/api/people", panel_people)
     app.router.add_get("/api/members/{chat_id:-[0-9]+}/{user_id:[0-9]+}/history", panel_member_history)
     app.router.add_post("/api/members/role", panel_assign_member_role)
