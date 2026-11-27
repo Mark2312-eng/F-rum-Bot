@@ -468,6 +468,12 @@ async def cmd_help(message: Message) -> None:
         "/chatinfo — информация о группе\n"
         "/rules — правила группы\n"
         "/setrules ТЕКСТ — установить правила (для администраторов)\n"
+        "/cmdperms — список прав команд\\n"
+        "/editcmd КОМАНДА ПРИОРИТЕТ — изменить доступ\\n"
+        "/roles — список ролей\\n"
+        "/newrole НАЗВАНИЕ ПРИОРИТЕТ — создать роль\\n"
+        "/chatrole ID РОЛЬ — назначить роль\\n"
+        "/removerole ID — снять роль\\n"
         "/cmdperms — список порогов доступа к командам\\n"
         "⚙️ <b>Настройки и обращения</b>\n"
         "/settings — антифлуд и политика ссылок\n"
@@ -1049,6 +1055,12 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(chat_removerole_handler, Command("removerole"))
     dispatcher.message.register(chat_editcmd_handler, Command("editcmd"))
     dispatcher.message.register(chat_cmdperms_handler, Command("cmdperms"))
+    dispatcher.message.register(chat_cmdperms_handler, Command("permissions"))
+    dispatcher.message.register(chat_roles_handler, Command("rolelist"))
+    dispatcher.message.register(chat_setrole_handler, Command("giverole"))
+    dispatcher.message.register(chat_setrole_handler, Command("setrole"))
+    dispatcher.message.register(chat_roles_handler, lambda message: bool(message.text and message.text.strip().lower() in {"!rolelist", "!permissions"}))
+    dispatcher.message.register(chat_setrole_handler, lambda message: bool(message.text and message.text.startswith(("!giverole ", "!setrole "))))
     dispatcher.message.register(chat_cmdperms_handler, lambda message: bool(message.text and message.text.strip() == "!cmdperms"))
     dispatcher.message.register(chat_gm_handler, Command("gm"))
     dispatcher.message.register(chat_roles_handler, lambda message: bool(message.text and message.text.strip() == "!roles"))
@@ -1129,6 +1141,9 @@ async def main() -> None:
             BotCommand(command="chatrole", description="Назначить роль участнику"),
             BotCommand(command="removerole", description="Снять роль участника"),
             BotCommand(command="editcmd", description="Изменить порог команды"),
+            BotCommand(command="cmdperms", description="Показать права команд"),
+            BotCommand(command="rolelist", description="Список ролей группы"),
+            BotCommand(command="giverole", description="Назначить роль участнику"),
             BotCommand(command="cmdperms", description="Просмотр прав на команды"),
             BotCommand(command="gm", description="Управление иммунитетом"),
             BotCommand(command="warn", description="Выдать предупреждение"),
