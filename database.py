@@ -27,6 +27,29 @@ async def record_legacy_schema_baseline(connection: asyncpg.Connection) -> None:
     )
 
 
+async def apply_global_blacklist_audit_migration(connection: asyncpg.Connection) -> None:
+    """Create the durable audit trail for global blacklist changes."""
+    async with connection.transaction():
+        await connection.execute("""
+            CREATE TABLE IF NOT EXISTS global_blacklist_audit (
+                id BIGSERIAL PRIMARY KEY,
+                target_id BIGINT NOT NULL,
+                actor_id BIGINT NOT NULL,
+                action TEXT NOT NULL CHECK (action IN ('add', 'update', 'remove')),
+                reason TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            CREATE INDEX IF NOT EXISTS global_blacklist_audit_created_idx
+                ON global_blacklist_audit (created_at DESC, id DESC);
+        """)
+        await connection.execute(
+            """INSERT INTO schema_migrations (version, description)
+               VALUES ($1, $2) ON CONFLICT (version) DO NOTHING""",
+            "0002_global_blacklist_audit",
+            "Durable audit history for global blacklist add, update and remove actions",
+        )
+
+
 class Database:
     def __init__(self) -> None:
         self.pool: asyncpg.Pool | None = None
@@ -313,6 +336,7 @@ class Database:
         await self.ensure_chat_roles()
         async with self.pool.acquire() as connection:
             await record_legacy_schema_baseline(connection)
+            await apply_global_blacklist_audit_migration(connection)
 
     async def close(self) -> None:
         if self.pool is not None:
@@ -612,17 +636,54 @@ class Database:
                WHERE chat_id = $1 AND id = $2 AND status = 'open'""", chat_id, report_id, actor_id)
         return result.endswith(" 1")
 
-    async def add_blacklist(self, user_id: int, actor_id: int, reason: str) -> None:
+    async def add_blacklist(self, user_id: int, actor_id: int, reason: str) -> str:
+        """Add or update a global blacklist entry and atomically audit the change."""
         pool = self._require_pool()
-        await pool.execute(
-            """INSERT INTO global_blacklist (user_id, added_by, reason) VALUES ($1, $2, $3)
-               ON CONFLICT (user_id) DO UPDATE SET added_by = EXCLUDED.added_by,
-               reason = EXCLUDED.reason, created_at = NOW()""", user_id, actor_id, reason[:300])
+        clean_reason = (reason or "Причина не указана")[:300]
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                existing = await connection.fetchrow(
+                    "SELECT user_id FROM global_blacklist WHERE user_id = $1 FOR UPDATE", user_id
+                )
+                action = "update" if existing else "add"
+                await connection.execute(
+                    """INSERT INTO global_blacklist (user_id, added_by, reason)
+                       VALUES ($1, $2, $3)
+                       ON CONFLICT (user_id) DO UPDATE SET added_by = EXCLUDED.added_by,
+                       reason = EXCLUDED.reason, created_at = NOW()""",
+                    user_id, actor_id, clean_reason,
+                )
+                await connection.execute(
+                    """INSERT INTO global_blacklist_audit (target_id, actor_id, action, reason)
+                       VALUES ($1, $2, $3, $4)""", user_id, actor_id, action, clean_reason,
+                )
+        return action
 
-    async def remove_blacklist(self, user_id: int) -> bool:
+    async def remove_blacklist(self, user_id: int, actor_id: int) -> bool:
+        """Remove an entry and preserve its previous reason in the audit trail."""
         pool = self._require_pool()
-        result = await pool.execute("DELETE FROM global_blacklist WHERE user_id = $1", user_id)
-        return result.endswith(" 1")
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                existing = await connection.fetchrow(
+                    "SELECT reason FROM global_blacklist WHERE user_id = $1 FOR UPDATE", user_id
+                )
+                if existing is None:
+                    return False
+                await connection.execute("DELETE FROM global_blacklist WHERE user_id = $1", user_id)
+                await connection.execute(
+                    """INSERT INTO global_blacklist_audit (target_id, actor_id, action, reason)
+                       VALUES ($1, $2, 'remove', $3)""", user_id, actor_id, existing["reason"],
+                )
+        return True
+
+    async def get_global_blacklist_history(self, limit: int = 100) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        safe_limit = max(1, min(int(limit), 200))
+        return await pool.fetch(
+            """SELECT target_id, actor_id, action, reason, created_at
+               FROM global_blacklist_audit ORDER BY created_at DESC, id DESC LIMIT $1""",
+            safe_limit,
+        )
 
     async def get_blacklist(self) -> list[asyncpg.Record]:
         pool = self._require_pool()
