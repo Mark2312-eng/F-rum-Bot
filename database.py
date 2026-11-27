@@ -526,12 +526,17 @@ class Database:
         pool = self._require_pool()
         safe_limit = max(1, min(int(limit), 50))
         return await pool.fetch(
-            """SELECT DISTINCT ON (target_id) target_id, action, details, created_at
-               FROM moderation_events
-               WHERE chat_id = $1 AND target_id IS NOT NULL
-                 AND action IN ('ban', 'unban')
-               ORDER BY target_id, created_at DESC, id DESC""",
-            chat_id,
+            """SELECT target_id, action, details, created_at
+               FROM (
+                   SELECT DISTINCT ON (target_id) target_id, action, details, created_at, id
+                   FROM moderation_events
+                   WHERE chat_id = $1 AND target_id IS NOT NULL
+                     AND action IN ('ban', 'unban')
+                   ORDER BY target_id, created_at DESC, id DESC
+               ) latest
+               ORDER BY created_at DESC
+               LIMIT $2""",
+            chat_id, safe_limit,
         )
 
     async def get_moderation_stats(self, chat_id: int) -> list[asyncpg.Record]:
