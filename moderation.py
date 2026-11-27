@@ -83,12 +83,19 @@ async def _can_manage_target(message: Message, bot: Bot, owner_id: int, target_i
     target_rank = max(target_rank, role_rank(await get_role(target_id, owner_id)))
     try:
         target_member = await bot.get_chat_member(message.chat.id, target_id)
-        if target_member.status == "creator":
-            target_rank = max(target_rank, 100)
-        elif target_member.status == "administrator":
-            target_rank = max(target_rank, 60)
     except Exception:
-        pass
+        # Never apply a moderation action when Telegram cannot confirm the
+        # target's current status. This protects admins during API outages.
+        await message.reply(
+            "⚠️ Не удалось проверить статус участника через Telegram. "
+            "Действие отменено; попробуйте позже."
+        )
+        return False
+
+    if target_member.status == "creator":
+        target_rank = max(target_rank, 100)
+    elif target_member.status == "administrator":
+        target_rank = max(target_rank, 60)
 
     if await database.is_chat_member_immune(message.chat.id, target_id) and actor_rank < 100:
         await message.reply("🛡 Этот участник защищён иммунитетом /gm.")
