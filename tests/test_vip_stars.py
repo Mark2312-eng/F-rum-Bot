@@ -33,10 +33,10 @@ class VipStarsConfigurationTests(unittest.TestCase):
                 for row in vip_shop_keyboard().inline_keyboard
                 for button in row
             ]
-            self.assertEqual(len(buttons), 3)
+            self.assertEqual(len(buttons), 6)
             self.assertEqual(
                 {button.callback_data for button in buttons},
-                {"vip:buy:silver", "vip:buy:gold", "vip:buy:diamond"},
+                {"vip:detail:silver", "vip:detail:gold", "vip:detail:diamond", "vip:page:compare", "vip:page:status", "vip:page:faq"},
             )
 
     def test_invalid_prices_are_rejected(self):
