@@ -18,7 +18,9 @@ from aiogram.types import (
 from database import database
 from system_roles import get_role, role_rank
 
-AUTO_ASSIGNABLE_ROLES = {"moderator"}
+# Tests may grant any local role below the Chief Admin threshold.
+AUTO_ASSIGNABLE_ROLE_MIN = 1
+AUTO_ASSIGNABLE_ROLE_MAX = 79
 
 
 async def _is_test_manager(user_id: int, owner_id: int) -> bool:
@@ -45,7 +47,7 @@ async def create_test_command(message: Message, owner_id: int) -> None:
     fields = _parse_fields(message.text or "")
     if len(fields) != 6:
         await message.answer(
-            "Формат:\n<code>/createtest Название | ID_ГРУППЫ | moderator | проходной_балл | кулдаун_дни | лимит_минут</code>\n"
+            "Формат:\n<code>/createtest Название | ID_ГРУППЫ | КЛЮЧ_РОЛИ | проходной_балл | кулдаун_дни | лимит_минут</code>\n"
             "Пример: <code>/createtest Проверка модератора | -100123456789 | moderator | 80 | 7 | 30</code>",
             parse_mode="HTML",
         )
@@ -62,16 +64,24 @@ async def create_test_command(message: Message, owner_id: int) -> None:
     if not 1 <= len(title) <= 120:
         await message.answer("Название должно содержать от 1 до 120 символов.")
         return
-    if role_key not in AUTO_ASSIGNABLE_ROLES:
-        await message.answer("Пока доступно автоматическое назначение только роли moderator.")
+    role = await pool.fetchrow(
+        """SELECT role_key, title, priority FROM chat_role_definitions
+           WHERE chat_id = $1 AND role_key = $2""",
+        chat_id, role_key,
+    ) if await database.is_chat_registered(chat_id) else None
+    if not role or not AUTO_ASSIGNABLE_ROLE_MIN <= int(role["priority"]) <= AUTO_ASSIGNABLE_ROLE_MAX:
+        await message.answer(
+            "Роль не найдена в этой группе или её приоритет вне диапазона 1–79. "
+            "Посмотрите доступные ключи командой /roles."
+        )
         return
     if not 1 <= pass_score <= 100 or not 0 <= cooldown_days <= 90 or not 1 <= time_limit <= 240:
         await message.answer("Допустимые значения: балл 1–100, кулдаун 0–90 дней, таймер 1–240 минут.")
         return
 
     pool = database._require_pool()
-    if not await database.is_chat_registered(chat_id):
-        await message.answer("Эта группа не подключена к боту. Сначала выполните /connect от имени владельца.")
+    if not role:
+        await message.answer("Эта группа не подключена к боту или роль недоступна.")
         return
     test_id = await pool.fetchval(
         """INSERT INTO moderation_tests
@@ -357,30 +367,13 @@ async def test_answer_callback(callback: CallbackQuery) -> None:
                        SET score = $2, status = $3, completed_at = NOW() WHERE id = $1""",
                     session_id, new_score, status,
                 )
-                assigned_role = session["role_key"] if passed else None
-                await connection.execute(
+                result_id = await connection.fetchval(
                     """INSERT INTO moderation_test_results
                        (test_id, user_id, score_percent, passed, role_assigned)
-                       VALUES ($1, $2, $3, $4, $5)""",
-                    session["test_id"], callback.from_user.id, percent, passed, assigned_role,
+                       VALUES ($1, $2, $3, $4, NULL) RETURNING id""",
+                    session["test_id"], callback.from_user.id, percent, passed,
                 )
-                if passed and session["role_key"] == "moderator":
-                    await connection.execute(
-                        """INSERT INTO chat_member_roles (chat_id, user_id, role_key, assigned_by)
-                           SELECT $1, $2, 'moderator', $3
-                           WHERE EXISTS (
-                             SELECT 1 FROM chat_role_definitions
-                             WHERE chat_id = $1 AND role_key = 'moderator'
-                           )
-                           ON CONFLICT (chat_id, user_id) DO NOTHING""",
-                        session["chat_id"], callback.from_user.id, session["creator_id"],
-                    )
-                    await connection.execute(
-                        """INSERT INTO chat_role_audit (chat_id, actor_id, target_id, action, details)
-                           VALUES ($1, $2, $3, 'test_role_assignment', 'moderator')""",
-                        session["chat_id"], session["creator_id"], callback.from_user.id,
-                    )
-                elif not passed and session["cooldown_days"] > 0:
+                if not passed and session["cooldown_days"] > 0:
                     await connection.execute(
                         """INSERT INTO moderation_test_cooldowns (test_id, user_id, available_at)
                            VALUES ($1, $2, NOW() + ($3 * INTERVAL '1 day'))
@@ -388,24 +381,62 @@ async def test_answer_callback(callback: CallbackQuery) -> None:
                            SET available_at = EXCLUDED.available_at""",
                         session["test_id"], callback.from_user.id, session["cooldown_days"],
                     )
-                outcome = (passed, percent, session["chat_id"], session["role_key"])
+                outcome = (
+                    passed, percent, session["chat_id"], session["role_key"],
+                    session["creator_id"], session["test_id"], result_id,
+                )
 
     await callback.answer("Ответ принят.")
     if next_question:
         await _send_question(callback.message, session_id, next_question)
         return
-    passed, percent, chat_id, role_key = outcome
+    passed, percent, chat_id, role_key, creator_id, test_id, result_id = outcome
     if passed:
-        await callback.message.answer(
-            f"✅ Тест завершён: <b>{percent}%</b>. Вам назначена роль модератора в целевой группе.",
-            parse_mode="HTML",
-        )
+        assignment_reason = None
         try:
-            await callback.bot.send_message(
-                chat_id,
-                f"🎓 Пользователь <code>{callback.from_user.id}</code> успешно прошёл тест и получил роль модератора.",
+            member = await callback.bot.get_chat_member(chat_id, callback.from_user.id)
+            if member.status in {"creator", "administrator"}:
+                assignment_reason = "участник является администратором Telegram"
+        except Exception:
+            assignment_reason = "не удалось проверить статус участника в Telegram"
+        assigned = False
+        if assignment_reason is None:
+            assigned = await database.assign_test_role_guarded(
+                chat_id, callback.from_user.id, role_key, creator_id,
+            )
+            if not assigned:
+                assignment_reason = "роль не назначена из-за приоритета или иммунитета участника"
+        if assigned:
+            pool = database._require_pool()
+            await pool.execute(
+                "UPDATE moderation_test_results SET role_assigned = $2 WHERE id = $1",
+                result_id, role_key,
+            )
+            role_row = await database.get_chat_member_role(chat_id, callback.from_user.id)
+            role_title = role_row["title"] if role_row else role_key
+            await callback.message.answer(
+                f"✅ Тест завершён: <b>{percent}%</b>. Вам назначена роль "
+                f"<b>{escape(role_title)}</b> в целевой группе.",
                 parse_mode="HTML",
             )
+            group_notice = (
+                f"🎓 Пользователь <code>{callback.from_user.id}</code> успешно прошёл тест "
+                f"и получил роль <b>{escape(role_title)}</b>."
+            )
+        else:
+            await callback.message.answer(
+                f"✅ Тест пройден: <b>{percent}%</b>. Автоматическое назначение роли "
+                f"<code>{escape(role_key)}</code> не выполнено: {escape(assignment_reason)}. "
+                "Результат теста сохранён.",
+                parse_mode="HTML",
+            )
+            group_notice = (
+                f"🎓 Пользователь <code>{callback.from_user.id}</code> прошёл тест "
+                f"({percent}%), но роль <code>{escape(role_key)}</code> не назначена: "
+                f"{escape(assignment_reason)}."
+            )
+        try:
+            await callback.bot.send_message(chat_id, group_notice, parse_mode="HTML")
         except Exception:
             pass
     else:
