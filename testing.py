@@ -366,9 +366,19 @@ async def test_answer_callback(callback: CallbackQuery) -> None:
                 )
                 if passed and session["role_key"] == "moderator":
                     await connection.execute(
-                        """INSERT INTO chat_moderators (chat_id, user_id, assigned_by)
-                           VALUES ($1, $2, $3) ON CONFLICT (chat_id, user_id) DO NOTHING""",
+                        """INSERT INTO chat_member_roles (chat_id, user_id, role_key, assigned_by)
+                           SELECT $1, $2, 'moderator', $3
+                           WHERE EXISTS (
+                             SELECT 1 FROM chat_role_definitions
+                             WHERE chat_id = $1 AND role_key = 'moderator'
+                           )
+                           ON CONFLICT (chat_id, user_id) DO NOTHING""",
                         session["chat_id"], callback.from_user.id, session["creator_id"],
+                    )
+                    await connection.execute(
+                        """INSERT INTO chat_role_audit (chat_id, actor_id, target_id, action, details)
+                           VALUES ($1, $2, $3, 'test_role_assignment', 'moderator')""",
+                        session["chat_id"], session["creator_id"], callback.from_user.id,
                     )
                 elif not passed and session["cooldown_days"] > 0:
                     await connection.execute(
