@@ -31,6 +31,7 @@ from group_info import admins_command, chatinfo_command, rules_command, setrules
 from support_system import ensure_support_schema, register_support_routes, register_support_bot
 from privacy_broadcast import ensure_privacy_schema, has_consent, has_subscription_choice, show_consent_prompt, show_subscription_prompt, register_privacy_broadcast_handlers
 from vip_stars import ensure_vip_schema, register_vip_handlers
+from community_events import ensure_events_schema, register_events_poll_handlers
 
 load_dotenv()
 
@@ -1641,6 +1642,7 @@ def create_dispatcher() -> Dispatcher:
     register_support_bot(dispatcher)
     register_privacy_broadcast_handlers(dispatcher)
     register_vip_handlers(dispatcher)
+    register_events_poll_handlers(dispatcher)
     dispatcher.message.register(cmd_start, Command("start"))
     dispatcher.message.register(cmd_help, Command("help"))
     dispatcher.message.register(cmd_profile, Command("profile"))
@@ -1768,6 +1770,7 @@ async def main() -> None:
         await database.connect()
         await ensure_privacy_schema()
         await ensure_vip_schema()
+        await ensure_events_schema()
         await ensure_support_schema()
         LOGGER.info("PostgreSQL connection established; support schema ready")
         runner = await start_web_server(port, bot)
@@ -1786,6 +1789,10 @@ async def main() -> None:
             BotCommand(command="vipname", description="Имя в VIP-карточке (Gold+)"),
             BotCommand(command="viptitle", description="Титул в VIP-карточке (Diamond)"),
             BotCommand(command="paysupport", description="Помощь по платежам"),
+            BotCommand(command="eventcreate", description="Создать мероприятие (владелец)"),
+            BotCommand(command="events", description="Список мероприятий и запись"),
+            BotCommand(command="pollcreate", description="Создать голосование (владелец)"),
+            BotCommand(command="polls", description="Список голосований"),
             BotCommand(command="help", description="Список команд"),
             BotCommand(command="profile", description="Профиль форума"),
             BotCommand(command="punish", description="Проверить наказание"),
