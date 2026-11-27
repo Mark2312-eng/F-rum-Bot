@@ -23,6 +23,10 @@ AUTO_ASSIGNABLE_ROLE_MIN = 1
 AUTO_ASSIGNABLE_ROLE_MAX = 79
 
 
+def _is_auto_assignable_priority(priority: int) -> bool:
+    return AUTO_ASSIGNABLE_ROLE_MIN <= priority <= AUTO_ASSIGNABLE_ROLE_MAX
+
+
 async def _is_test_manager(user_id: int, owner_id: int) -> bool:
     return role_rank(await get_role(user_id, owner_id)) >= 80
 
@@ -73,7 +77,7 @@ async def create_test_command(message: Message, owner_id: int) -> None:
            WHERE chat_id = $1 AND role_key = $2""",
         chat_id, role_key,
     )
-    if not role or not AUTO_ASSIGNABLE_ROLE_MIN <= int(role["priority"]) <= AUTO_ASSIGNABLE_ROLE_MAX:
+    if not role or not _is_auto_assignable_priority(int(role["priority"])):
         await message.answer(
             "Роль не найдена в этой группе или её приоритет вне диапазона 1–79. "
             "Посмотрите доступные ключи командой /roles."
