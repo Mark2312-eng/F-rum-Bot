@@ -43,7 +43,7 @@
         <div class="dash-actions"><span class="live-label"><span class="status-dot"></span> СЕССИЯ АКТИВНА</span><button id="refresh" class="button button-secondary" type="button">↻ Обновить</button><button id="export-csv" class="button button-quiet" type="button">↓ Экспорт CSV</button><button id="logout" class="button button-quiet" type="button">Выйти</button></div>
       </div>
       <nav class="dash-nav" aria-label="Разделы панели">
-        <a class="active" href="#overview">Обзор</a><a href="#reports">Жалобы</a><a href="#members">Участники</a><a href="#audit">Журнал</a><a href="#groups">Группы</a><a href="#tests">Тесты</a><a href="#results">Результаты</a>
+        <a class="active" href="#overview">Обзор</a><a href="#reports">Жалобы</a><a href="#members">Участники</a><a href="#people">Роли</a><a href="#audit">Журнал</a><a href="#groups">Группы</a><a href="#tests">Тесты</a><a href="#results">Результаты</a>
       </nav>
       <div id="overview" class="section-label"><span>01 / СВОДКА</span><span id="updated-at">Загрузка данных…</span></div>
       <div id="stats" class="stats" aria-live="polite"></div>
@@ -53,6 +53,17 @@
       <section id="results" class="block"><div class="block-head"><div><span class="section-index">02.3</span><h2>Последние результаты</h2><p>Недавние попытки участников</p></div><span id="results-count" class="count">—</span></div><div id="results-table"></div></section>
       <section id="reports" class="block"><div class="block-head"><div><span class="section-index">03.1</span><h2>Очередь жалоб</h2><p>Открытые обращения участников из подключённых групп</p></div><span id="reports-count" class="count">—</span></div><div id="reports-table"></div></section>
       <section id="members" class="block"><div class="block-head"><div><span class="section-index">03.2</span><h2>Участники</h2><p>Известная активность, роли и предупреждения</p></div><span id="members-count" class="count">—</span></div><div id="members-table"></div></section>
+      <section id="people" class="block people-block">
+        <div class="block-head"><div><span class="section-index">04.1</span><h2>Управление участниками и ролями</h2><p>Назначение ролей в группах с проверкой иерархии и статуса Telegram</p></div><span id="people-count" class="count">—</span></div>
+        <div class="people-controls">
+          <label class="field-label">Группа<select id="people-chat"><option value="">Все группы · только просмотр</option></select></label>
+          <label class="field-label people-search">Поиск участника<input id="people-search" type="search" placeholder="Имя, @username или Telegram ID" autocomplete="off"></label>
+          <button id="people-find" class="button button-secondary" type="button">Найти</button>
+        </div>
+        <div id="role-catalog" class="role-catalog"></div>
+        <div id="people-table"></div>
+        <p class="people-note">Назначение доступно только в выбранной группе. Владелец и администраторы Telegram защищены от изменения ролей. Приоритет роли не может быть равен или выше приоритета управляющего.</p>
+      </section>
       <section id="audit" class="block"><div class="block-head"><div><span class="section-index">03.3</span><h2>Журнал модерации</h2><p>Последние действия бота и модераторов</p></div><span id="events-count" class="count">—</span></div><div id="events-table"></div></section>
       <p id="dashboard-error" class="message" role="status" aria-live="polite"></p>
     </section>
