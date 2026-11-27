@@ -903,6 +903,8 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(chat_removerole_handler, lambda message: bool(message.text and message.text.startswith("!removerole ")))
     dispatcher.message.register(chat_editcmd_handler, lambda message: bool(message.text and message.text.startswith("!editcmd ")))
     dispatcher.message.register(chat_gm_handler, lambda message: bool(message.text and message.text.startswith("!gm ")))
+    dispatcher.message.register(chat_setrole_handler, lambda message: bool(message.text and message.text.startswith("+role ")))
+    dispatcher.message.register(chat_removerole_handler, lambda message: bool(message.text and message.text.startswith("-role ")))
     dispatcher.callback_query.register(test_answer_callback, F.data.startswith("testq:"))
     dispatcher.message.register(button_input_handler, lambda message: bool(message.from_user and message.from_user.id in PENDING_INPUTS))
     dispatcher.message.register(group_moderation_handler)
