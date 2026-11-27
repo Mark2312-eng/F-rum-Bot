@@ -50,6 +50,7 @@ def _date(value) -> str:
 def build_user_stats_message(user, stats, role_title: str, blocked: bool) -> str:
     nickname = stats.get("nickname") or user.full_name
     first_seen = _date(stats.get("first_seen_at"))
+    date_label = "Дата вступления в чат" if stats.get("join_event_seen") else "Впервые замечен ботом"
     inviter_id = stats.get("invited_by")
     inviter = f"<code>{inviter_id}</code>" if inviter_id else "—"
     status = "🔒 да" if blocked else "нет"
