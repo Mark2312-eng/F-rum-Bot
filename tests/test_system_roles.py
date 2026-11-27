@@ -1,29 +1,43 @@
-"""Tests for global staff-role definitions and authorization."""
+"""Tests for the canonical staff role catalogue and authorization."""
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from staff_role_catalog import DEPARTMENT_TITLES, ROLE_CATALOG, STAFF_ROLES
 from system_roles import ROLES, can_manage_rank, has_permission, role_key, role_rank
 
 
 class SystemRoleTests(unittest.IsolatedAsyncioTestCase):
-    def test_all_staff_roles_have_titles_ranks_and_permissions(self):
-        self.assertGreaterEqual(len(ROLES), 10)
-        for key, role in ROLES.items():
-            with self.subTest(role=key):
-                self.assertTrue(role["title"])
-                self.assertGreater(role["rank"], 0)
-                self.assertIsInstance(role["permissions"], set)
+    def test_catalog_contains_every_requested_role_except_implicit_owner(self):
+        self.assertEqual(len(STAFF_ROLES), 45)
+        self.assertEqual(len(ROLE_CATALOG), len(STAFF_ROLES))
+        self.assertEqual(len({role.title for role in STAFF_ROLES}), len(STAFF_ROLES))
+        for role in STAFF_ROLES:
+            with self.subTest(role=role.key):
+                self.assertTrue(role.title)
+                self.assertIn(role.department, DEPARTMENT_TITLES)
+                self.assertGreater(role.rank, 0)
+                self.assertIsInstance(role.permissions, frozenset)
 
     def test_role_keys_and_title_aliases(self):
-        self.assertEqual(role_key("director"), "director")
+        self.assertEqual(role_key("project_team"), "project_team")
+        self.assertEqual(role_key("Специальный администратор"), "special_admin")
         self.assertEqual(role_key("chief-admin"), "chief_admin")
+        self.assertEqual(role_key("Главный администратор"), "head_administrator")
+        self.assertEqual(role_key("Администратор"), "administrator")
         self.assertEqual(role_key("директор_бота"), "director")
+        self.assertEqual(role_key("владелец_проекта"), "owner")
         self.assertIsNone(role_key("unknown_role"))
+
+    def test_legacy_assignments_remain_readable(self):
+        self.assertIn("director", ROLES)
+        self.assertIn("developer", ROLES)
+        self.assertEqual(ROLES["developer"]["permissions"], {"staff_view", "technical"})
 
     def test_role_hierarchy_requires_strictly_higher_rank(self):
         self.assertEqual(role_rank("owner"), 100)
-        self.assertEqual(role_rank("director"), 90)
+        self.assertEqual(role_rank("project_team"), 95)
         self.assertEqual(role_rank("moderator"), 30)
+        self.assertEqual(role_rank("chat_moderator"), 55)
         self.assertEqual(role_rank(None), 0)
         self.assertTrue(can_manage_rank(60, 30))
         self.assertFalse(can_manage_rank(30, 30))
@@ -41,9 +55,21 @@ class SystemRoleTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(await has_permission(200, 100, "settings"))
 
     async def test_technical_role_does_not_get_moderation(self):
-        with patch("system_roles.database.get_system_role", new=AsyncMock(return_value="developer")):
+        with patch("system_roles.database.get_system_role", new=AsyncMock(return_value="tech_specialist")):
             self.assertTrue(await has_permission(300, 100, "technical"))
             self.assertFalse(await has_permission(300, 100, "moderation"))
+
+    async def test_tester_does_not_get_moderation_or_technical_permissions(self):
+        with patch("system_roles.database.get_system_role", new=AsyncMock(return_value="tester")):
+            self.assertTrue(await has_permission(301, 100, "testing_review"))
+            self.assertFalse(await has_permission(301, 100, "moderation"))
+            self.assertFalse(await has_permission(301, 100, "technical"))
+
+    async def test_organization_supervisor_is_scoped(self):
+        with patch("system_roles.database.get_system_role", new=AsyncMock(return_value="supervisor_umvd")):
+            self.assertTrue(await has_permission(302, 100, "organizations"))
+            self.assertFalse(await has_permission(302, 100, "moderation"))
+            self.assertFalse(await has_permission(302, 100, "staff_manage"))
 
 
 if __name__ == "__main__":
