@@ -8,7 +8,7 @@ from system_roles import ROLES, can_manage_rank, has_permission, role_key, role_
 
 class SystemRoleTests(unittest.IsolatedAsyncioTestCase):
     def test_catalog_contains_every_requested_role_except_implicit_owner(self):
-        self.assertEqual(len(STAFF_ROLES), 44)
+        self.assertEqual(len(STAFF_ROLES), 45)
         self.assertEqual(len(ROLE_CATALOG), len(STAFF_ROLES))
         self.assertEqual(len({role.title for role in STAFF_ROLES}), len(STAFF_ROLES))
         for role in STAFF_ROLES:
