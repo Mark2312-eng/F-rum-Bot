@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from support_system import _make_user_session, _session_user, _valid_telegram_login
+from support_system import STAFF_APPLICATION_ROLES, _make_user_session, _session_user, _valid_telegram_login
 
 
 class TelegramLoginTests(unittest.TestCase):
@@ -55,6 +55,9 @@ class TelegramLoginTests(unittest.TestCase):
         token = _make_user_session(987654321)
         request = SimpleNamespace(cookies={"support_session": token})
         self.assertEqual(_session_user(request), 987654321)
+
+    def test_staff_application_roles_are_limited_to_non_privileged_roles(self):
+        self.assertEqual(STAFF_APPLICATION_ROLES, {"helper", "moderator", "support"})
 
     def test_invalid_user_session_is_rejected(self):
         request = SimpleNamespace(cookies={"support_session": "987654321.9999999999.invalid"})
