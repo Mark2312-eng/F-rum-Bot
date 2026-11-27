@@ -194,7 +194,7 @@ async def _get_moderation_target(message: Message, bot: Bot):
         return message.reply_to_message.from_user
     raw_text = (message.text or "").strip()
     raw_parts = raw_text.split(maxsplit=1)
-    raw_id = raw_parts[1].split(maxsplit=1)[0].strip() if raw_text.startswith("/") and len(raw_parts) > 1 else raw_text
+    raw_id = raw_parts[1].split(maxsplit=1)[0].strip() if raw_text.startswith(("/", "!")) and len(raw_parts) > 1 else raw_text
     try:
         target_id = int(raw_id)
     except (TypeError, ValueError):
