@@ -15,13 +15,13 @@ DEFAULT_COMMAND_PRIORITIES = {
     "ban": 40, "unban": 40, "purge": 40,
     "modstats": 20, "modlog": 20,
     "warnhistory": 20, "warnlist": 20, "banlist": 40, "baninfo": 20,
-    "admins": 0, "chatinfo": 0, "rules": 0, "setrules": 60,
+    "admins": 0, "chatinfo": 0, "rules": 0, "setrules": 60, "rolelog": 80,
     "reports": 20, "reportclose": 40, "role": 60, "nick": 40, "blacklist": 80,
 }
 MANAGEABLE_COMMANDS = set(DEFAULT_COMMAND_PRIORITIES) | {
     "reports", "reportclose", "role", "nick", "blacklist",
     "warnhistory", "warnlist", "banlist", "baninfo",
-    "admins", "chatinfo", "rules", "setrules",
+    "admins", "chatinfo", "rules", "setrules", "rolelog",
 }
 
 
@@ -286,6 +286,37 @@ async def gm_command(message: Message, owner_id: int) -> None:
         f"🛡 Иммунитет для <code>{target_id}</code> {'включён' if enabled else 'снят'}."
         if changed else "⛔ Нельзя менять иммунитет равному/старшему сотруднику."
     )
+
+
+async def rolelog_command(message: Message, owner_id: int) -> None:
+    actor_priority = await _group_and_actor(message, message.bot, owner_id)
+    if actor_priority is None:
+        return
+    rows = await database.get_chat_role_audit(message.chat.id, 30)
+    if not rows:
+        await message.answer("📜 История изменений ролей пока пуста.")
+        return
+    labels = {
+        "assign_role": "Назначение роли",
+        "remove_role": "Снятие роли",
+        "create_role": "Создание роли",
+        "delete_role": "Удаление роли",
+        "set_immunity": "Изменение иммунитета",
+        "set_command_permission": "Изменение прав команды",
+    }
+    lines = ["📜 <b>История управления ролями</b>", ""]
+    for row in rows:
+        stamp = row["created_at"]
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=__import__("datetime").timezone.utc)
+        when = stamp.strftime("%d.%m.%Y %H:%M UTC")
+        target = f" → <code>{row['target_id']}</code>" if row["target_id"] else ""
+        detail = f" · {escape(str(row['details']))}" if row["details"] else ""
+        lines.append(
+            f"• {labels.get(row['action'], row['action'])}{target}{detail}\n"
+            f"  инициатор <code>{row['actor_id']}</code> · <i>{when}</i>"
+        )
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 async def command_priority_allowed(message: Message, owner_id: int, command_name: str) -> bool:
