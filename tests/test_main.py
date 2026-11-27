@@ -339,6 +339,8 @@ class PollingLockTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PanelRoleAuthorizationTests(unittest.IsolatedAsyncioTestCase):
+    from aiohttp import web
+
     async def test_role_management_requires_exact_panel_origin(self):
         from unittest.mock import patch
 
