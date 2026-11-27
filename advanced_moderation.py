@@ -19,14 +19,19 @@ async def _allowed(message: Message, bot: Bot, owner_id: int) -> bool:
     if message.from_user.id == owner_id:
         return True
     member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status in {"administrator", "creator"}:
-        return True
-    if await database.is_custom_moderator(message.chat.id, message.from_user.id):
-        return True
-    from system_roles import has_permission
-    import os
-    configured_owner = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
-    return await has_permission(message.from_user.id, configured_owner, "reports")
+    authorized = member.status in {"administrator", "creator"}
+    if not authorized:
+        authorized = await database.get_chat_member_priority(message.chat.id, message.from_user.id) >= 20
+    if not authorized:
+        from system_roles import has_permission
+        import os
+        configured_owner = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+        authorized = await has_permission(message.from_user.id, configured_owner, "reports")
+    if not authorized:
+        return False
+    from chat_roles import command_priority_allowed
+    command_name = (message.text or "").split(maxsplit=1)[0].split("@", 1)[0].lstrip("/!")
+    return await command_priority_allowed(message, owner_id, command_name)
 
 
 async def report_command(message: Message, bot: Bot) -> None:
@@ -159,28 +164,57 @@ async def nickname_command(message: Message, bot: Bot, owner_id: int) -> None:
 async def role_command(message: Message, bot: Bot, owner_id: int) -> None:
     if not await _allowed(message, bot, owner_id):
         return
-    member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-    from system_roles import has_permission
-    if message.from_user.id != owner_id and member.status not in {"administrator", "creator"} and not await has_permission(message.from_user.id, owner_id, "staff_manage"):
-        await message.reply("⛔ Управлять ролями могут владельцы, администраторы Telegram и руководство бота.")
+    if not message.from_user:
         return
+    from chat_roles import effective_chat_priority
+    actor_priority = await effective_chat_priority(message, owner_id)
+    if actor_priority < 60:
+        await message.reply("⛔ Управлять ролями модерации могут участники с приоритетом 60+.")
+        return
+
     parts = (message.text or "").split()
     if len(parts) == 1 or parts[1].lower() == "list":
-        rows = await database.list_custom_moderators(message.chat.id)
-        await message.answer("👮 Дополнительные модераторы:\n" + (
-            "\n".join(f"• <code>{r['user_id']}</code>" for r in rows) if rows else "Список пуст."
-        ), parse_mode="HTML")
+        rows = await database.list_chat_member_roles(message.chat.id)
+        lines = ["👮 <b>Роли участников группы</b>"]
+        if rows:
+            lines.extend(
+                f"• <code>{row['user_id']}</code> — {escape(row['title'])} ({row['priority']})"
+                for row in rows
+            )
+        else:
+            lines.append("Назначенных ролей пока нет.")
+        await message.answer("\\n".join(lines), parse_mode="HTML")
         return
+
     if len(parts) != 3 or parts[1].lower() not in {"add", "del"} or not parts[2].isdigit():
         await message.reply("Формат: /role add ID, /role del ID или /role list.")
         return
     user_id = int(parts[2])
-    if user_id == owner_id or await __import__("moderation").is_chat_admin(bot, message.chat.id, user_id):
-        await message.reply("Владельца и администраторов Telegram нельзя переопределять.")
+    if user_id == message.from_user.id:
+        await message.reply("Нельзя изменять собственную роль.")
         return
+    try:
+        target_member = await bot.get_chat_member(message.chat.id, user_id)
+        if target_member.status in {"creator", "administrator"}:
+            await message.reply("Владельца и администраторов Telegram нельзя переопределять.")
+            return
+    except Exception:
+        await message.reply("Не удалось проверить участника группы.")
+        return
+
     if parts[1].lower() == "add":
-        await database.set_custom_moderator(message.chat.id, user_id, message.from_user.id)
-        await message.answer(f"👮 <code>{user_id}</code> назначен модератором.", parse_mode="HTML")
+        assigned = await database.assign_chat_role_guarded(
+            message.chat.id, user_id, "moderator", message.from_user.id, actor_priority
+        )
+        await message.answer(
+            f"👮 <code>{user_id}</code> назначен модератором."
+            if assigned else "⛔ Назначение запрещено иерархией или иммунитетом.",
+            parse_mode="HTML",
+        )
     else:
-        removed = await database.remove_custom_moderator(message.chat.id, user_id)
-        await message.answer("Роль снята." if removed else "Пользователь не найден в списке.")
+        removed = await database.remove_chat_role_guarded(
+            message.chat.id, user_id, message.from_user.id, actor_priority
+        )
+        if not removed:
+            removed = await database.remove_custom_moderator(message.chat.id, user_id)
+        await message.answer("Роль снята." if removed else "Пользователь не найден в списке ролей.")

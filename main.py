@@ -19,6 +19,8 @@ from moderation import ban_member, clear_warnings, kick_member, moderate_message
 from group_settings import apply_setting_callback, show_group_settings
 from advanced_moderation import blacklist_command, nickname_command, report_command, reportclose_command, reports_command, role_command
 from system_roles import staff_command, myrole_command, staffinfo_command, setrole_command, staffremove_command, stafflog_command, rolehelp_command, syshealth_command, reporthelp_command
+from testing import create_test_command, add_question_command, send_test_command, test_results_command, handle_test_start, test_answer_callback
+from chat_roles import roles_command, newrole_command, delrole_command, set_chat_role_command, remove_chat_role_command, editcmd_command, gm_command
 
 load_dotenv()
 
@@ -351,6 +353,8 @@ async def send_forum_stats(message: Message) -> None:
 
 
 async def cmd_start(message: Message) -> None:
+    if await handle_test_start(message):
+        return
     try:
         forum_url = get_forum_url()
     except ValueError:
@@ -404,6 +408,19 @@ async def cmd_help(message: Message) -> None:
         "/rolehelp — справка по должностям\n"
         "/syshealth — техническая диагностика (тех. роли)\n"
         "/reporthelp — регламент поддержки\n"
+        "/createtest — создать тест (сотрудники 80+)\n"
+        "/testadd — добавить вопрос\n"
+        "/sendtest ID ТЕСТА — выдать тест\n"
+        "/testresults ID — результаты теста\n"
+        "/roles — роли этой группы и приоритеты\n"
+        "/newrole Название Приоритет — создать роль (80+)\n"
+        "/delrole КЛЮЧ — удалить пустую пользовательскую роль\n"
+        "/chatrole ID КЛЮЧ — назначить роль участнику\n"
+        "/removerole ID — снять роль участника\n"
+        "/editcmd КОМАНДА ПРИОРИТЕТ — изменить порог (80+)\n"
+        "/gm ID on|off — иммунитет (80+)\n"
+        "!newrole, !delrole, !roles, !setrole, !removerole, !editcmd, !gm — короткие варианты\n"
+        "!warn, !mute, !unmute, !ban, !unban, !kick, !purge — короткие команды модерации\n"
         "/connect — подключить группу (владелец бота).\n\n"
         "Команды модерации доступны владельцу и администраторам подключённой группы. "
         "Боту нужны права администратора.",
@@ -775,6 +792,61 @@ async def system_reporthelp_handler(message: Message) -> None:
     await reporthelp_command(message, owner_id)
 
 
+async def test_create_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await create_test_command(message, owner_id)
+
+
+async def test_add_question_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await add_question_command(message, owner_id)
+
+
+async def test_send_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await send_test_command(message, owner_id)
+
+
+async def test_results_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await test_results_command(message, owner_id)
+
+
+async def chat_roles_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await roles_command(message, owner_id)
+
+
+async def chat_newrole_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await newrole_command(message, owner_id)
+
+
+async def chat_delrole_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await delrole_command(message, owner_id)
+
+
+async def chat_setrole_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await set_chat_role_command(message, owner_id)
+
+
+async def chat_removerole_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await remove_chat_role_command(message, owner_id)
+
+
+async def chat_editcmd_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await editcmd_command(message, owner_id)
+
+
+async def chat_gm_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await gm_command(message, owner_id)
+
+
 def create_dispatcher() -> Dispatcher:
     """Configure the moderation-first Telegram dispatcher."""
     dispatcher = Dispatcher()
@@ -799,6 +871,16 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(group_warns_handler, Command("warns"))
     dispatcher.message.register(group_clearwarns_handler, Command("clearwarns"))
     dispatcher.message.register(group_modstats_handler, Command("modstats"))
+    dispatcher.message.register(group_warn_handler, lambda message: bool(message.text and message.text.startswith("!warn ")))
+    dispatcher.message.register(group_warns_handler, lambda message: bool(message.text and message.text.startswith("!warns ")))
+    dispatcher.message.register(group_clearwarns_handler, lambda message: bool(message.text and message.text.startswith("!clearwarns ")))
+    dispatcher.message.register(group_mute_handler, lambda message: bool(message.text and message.text.startswith("!mute ")))
+    dispatcher.message.register(group_unmute_handler, lambda message: bool(message.text and message.text.startswith("!unmute ")))
+    dispatcher.message.register(group_ban_handler, lambda message: bool(message.text and message.text.startswith("!ban ")))
+    dispatcher.message.register(group_unban_handler, lambda message: bool(message.text and message.text.startswith("!unban ")))
+    dispatcher.message.register(group_kick_handler, lambda message: bool(message.text and message.text.startswith("!kick ")))
+    dispatcher.message.register(group_purge_handler, lambda message: bool(message.text and message.text.startswith("!purge ")))
+    dispatcher.message.register(group_modstats_handler, lambda message: bool(message.text and message.text.startswith("!modstats ")))
     dispatcher.message.register(report_command, Command("report"))
     dispatcher.message.register(advanced_reports_handler, Command("reports"))
     dispatcher.message.register(advanced_reportclose_handler, Command("reportclose"))
@@ -814,6 +896,27 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(system_rolehelp_handler, Command("rolehelp"))
     dispatcher.message.register(system_syshealth_handler, Command("syshealth"))
     dispatcher.message.register(system_reporthelp_handler, Command("reporthelp"))
+    dispatcher.message.register(test_create_handler, Command("createtest"))
+    dispatcher.message.register(test_add_question_handler, Command("testadd"))
+    dispatcher.message.register(test_send_handler, Command("sendtest"))
+    dispatcher.message.register(test_results_handler, Command("testresults"))
+    dispatcher.message.register(chat_roles_handler, Command("roles"))
+    dispatcher.message.register(chat_newrole_handler, Command("newrole"))
+    dispatcher.message.register(chat_delrole_handler, Command("delrole"))
+    dispatcher.message.register(chat_setrole_handler, Command("chatrole"))
+    dispatcher.message.register(chat_removerole_handler, Command("removerole"))
+    dispatcher.message.register(chat_editcmd_handler, Command("editcmd"))
+    dispatcher.message.register(chat_gm_handler, Command("gm"))
+    dispatcher.message.register(chat_roles_handler, lambda message: bool(message.text and message.text.strip() == "!roles"))
+    dispatcher.message.register(chat_newrole_handler, lambda message: bool(message.text and message.text.startswith("!newrole ")))
+    dispatcher.message.register(chat_delrole_handler, lambda message: bool(message.text and message.text.startswith("!delrole ")))
+    dispatcher.message.register(chat_setrole_handler, lambda message: bool(message.text and message.text.startswith("!setrole ")))
+    dispatcher.message.register(chat_removerole_handler, lambda message: bool(message.text and message.text.startswith("!removerole ")))
+    dispatcher.message.register(chat_editcmd_handler, lambda message: bool(message.text and message.text.startswith("!editcmd ")))
+    dispatcher.message.register(chat_gm_handler, lambda message: bool(message.text and message.text.startswith("!gm ")))
+    dispatcher.message.register(chat_setrole_handler, lambda message: bool(message.text and message.text.startswith("+role ")))
+    dispatcher.message.register(chat_removerole_handler, lambda message: bool(message.text and message.text.startswith("-role ")))
+    dispatcher.callback_query.register(test_answer_callback, F.data.startswith("testq:"))
     dispatcher.message.register(button_input_handler, lambda message: bool(message.from_user and message.from_user.id in PENDING_INPUTS))
     dispatcher.message.register(group_moderation_handler)
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
@@ -870,6 +973,17 @@ async def main() -> None:
             BotCommand(command="rolehelp", description="Справка по должностям"),
             BotCommand(command="syshealth", description="Техническая диагностика"),
             BotCommand(command="reporthelp", description="Регламент поддержки"),
+            BotCommand(command="createtest", description="Создать тест (системная команда 80+)"),
+            BotCommand(command="testadd", description="Добавить вопрос в тест"),
+            BotCommand(command="sendtest", description="Выдать тест пользователю"),
+            BotCommand(command="testresults", description="Результаты теста"),
+            BotCommand(command="roles", description="Роли этой группы"),
+            BotCommand(command="newrole", description="Создать роль группы"),
+            BotCommand(command="delrole", description="Удалить роль группы"),
+            BotCommand(command="chatrole", description="Назначить роль участнику"),
+            BotCommand(command="removerole", description="Снять роль участника"),
+            BotCommand(command="editcmd", description="Изменить порог команды"),
+            BotCommand(command="gm", description="Управление иммунитетом"),
             BotCommand(command="warn", description="Выдать предупреждение"),
             BotCommand(command="warns", description="Проверить предупреждения"),
             BotCommand(command="clearwarns", description="Сбросить предупреждения"),

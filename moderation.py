@@ -50,38 +50,37 @@ async def is_chat_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
 async def is_moderator(message: Message, bot: Bot, owner_id: int) -> bool:
     if not message.from_user:
         return False
-    if message.from_user.id == owner_id:
-        return True
-    if await is_chat_admin(bot, message.chat.id, message.from_user.id):
-        return True
-    if await database.is_custom_moderator(message.chat.id, message.from_user.id):
-        return True
-    from system_roles import has_permission
-    return await has_permission(message.from_user.id, owner_id, "moderation")
+    authorized = message.from_user.id == owner_id
+    if not authorized:
+        try:
+            member = await bot.get_chat_member(message.chat.id, message.from_user.id)
+            authorized = member.status in {"administrator", "creator"}
+        except Exception:
+            pass
+    if not authorized:
+        authorized = await database.get_chat_member_priority(message.chat.id, message.from_user.id) >= 20
+    if not authorized:
+        from system_roles import has_permission
+        authorized = await has_permission(message.from_user.id, owner_id, "moderation")
+    if not authorized:
+        return False
+    from chat_roles import command_priority_allowed
+    command_name = (message.text or "").split(maxsplit=1)[0].split("@", 1)[0].lstrip("/!")
+    return await command_priority_allowed(message, owner_id, command_name)
 
 
 async def _can_manage_target(message: Message, bot: Bot, owner_id: int, target_id: int) -> bool:
-    """Enforce the global staff hierarchy and delegated-moderator priority."""
+    """Enforce per-chat priorities, global staff rank and immunity."""
     if not message.from_user:
         return False
 
-    from system_roles import get_role, role_rank, can_manage_rank
+    from chat_roles import effective_chat_priority, can_manage_priority
+    from system_roles import get_role, role_rank
 
     actor_id = message.from_user.id
-    actor_rank = role_rank(await get_role(actor_id, owner_id))
-    target_rank = role_rank(await get_role(target_id, owner_id))
-
-    # Telegram group administrators receive local priority 60; delegated
-    # moderators receive priority 30. Global system rank can be higher.
-    if actor_id != owner_id:
-        try:
-            actor_member = await bot.get_chat_member(message.chat.id, actor_id)
-            if actor_member.status == "creator":
-                actor_rank = max(actor_rank, 100)
-            elif actor_member.status == "administrator":
-                actor_rank = max(actor_rank, 60)
-        except Exception:
-            pass
+    actor_rank = await effective_chat_priority(message, owner_id)
+    target_rank = await database.get_chat_member_priority(message.chat.id, target_id)
+    target_rank = max(target_rank, role_rank(await get_role(target_id, owner_id)))
     try:
         target_member = await bot.get_chat_member(message.chat.id, target_id)
         if target_member.status == "creator":
@@ -90,12 +89,11 @@ async def _can_manage_target(message: Message, bot: Bot, owner_id: int, target_i
             target_rank = max(target_rank, 60)
     except Exception:
         pass
-    if await database.is_custom_moderator(message.chat.id, actor_id):
-        actor_rank = max(actor_rank, 30)
-    if await database.is_custom_moderator(message.chat.id, target_id):
-        target_rank = max(target_rank, 30)
 
-    if not can_manage_rank(actor_rank, target_rank):
+    if await database.is_chat_member_immune(message.chat.id, target_id) and actor_rank < 100:
+        await message.reply("🛡 Этот участник защищён иммунитетом /gm.")
+        return False
+    if not can_manage_priority(actor_rank, target_rank):
         await message.reply("⛔ Нельзя применять действия к пользователю с равным или более высоким приоритетом.")
         return False
     return True
@@ -196,7 +194,7 @@ async def _get_moderation_target(message: Message, bot: Bot):
         return message.reply_to_message.from_user
     raw_text = (message.text or "").strip()
     raw_parts = raw_text.split(maxsplit=1)
-    raw_id = raw_parts[1].split(maxsplit=1)[0].strip() if raw_text.startswith("/") and len(raw_parts) > 1 else raw_text
+    raw_id = raw_parts[1].split(maxsplit=1)[0].strip() if raw_text.startswith(("/", "!")) and len(raw_parts) > 1 else raw_text
     try:
         target_id = int(raw_id)
     except (TypeError, ValueError):
@@ -364,7 +362,7 @@ async def _moderation_command_allowed(message: Message, bot: Bot, owner_id: int)
         await message.reply("Сначала подключите группу командой /connect от имени владельца.")
         return False
     if not await is_moderator(message, bot, owner_id):
-        await message.reply("⛔ Команда доступна только владельцу и администраторам группы.")
+        await message.reply("⛔ Для этой команды нужна роль помощника (20) или выше.")
         return False
     return True
 
