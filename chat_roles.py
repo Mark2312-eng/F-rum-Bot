@@ -223,6 +223,14 @@ async def gm_command(message: Message, owner_id: int) -> None:
         await message.reply("Нельзя менять иммунитет самому себе.")
         return
     enabled = parts[2].lower() == "on"
+    try:
+        target_member = await message.bot.get_chat_member(message.chat.id, target_id)
+        if target_member.status in {"creator", "administrator"}:
+            await message.reply("Владельца и администраторов Telegram нельзя изменять через /gm.")
+            return
+    except Exception:
+        await message.reply("Не удалось проверить участника группы.")
+        return
     changed = await database.set_chat_immunity_guarded(
         message.chat.id, target_id, message.from_user.id, actor_priority, enabled
     )
@@ -236,9 +244,8 @@ async def command_priority_allowed(message: Message, owner_id: int, command_name
     if not message.from_user:
         return False
     actor_priority = await effective_chat_priority(message, owner_id)
-    minimum = await database.get_chat_command_priority(message.chat.id, command_name)
-    if minimum == 0:
-        minimum = DEFAULT_COMMAND_PRIORITIES.get(command_name, 0)
+    configured_minimum = await database.get_chat_command_priority(message.chat.id, command_name)
+    minimum = configured_minimum if configured_minimum is not None else DEFAULT_COMMAND_PRIORITIES.get(command_name, 0)
     if actor_priority < minimum:
         await message.reply(f"⛔ Для /{command_name} нужен приоритет не ниже {minimum}.")
         return False
