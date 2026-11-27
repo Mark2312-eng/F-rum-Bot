@@ -2,7 +2,10 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from testing import AUTO_ASSIGNABLE_ROLE_MAX, AUTO_ASSIGNABLE_ROLE_MIN, _is_test_manager, _parse_fields
+from testing import (
+    AUTO_ASSIGNABLE_ROLE_MAX, AUTO_ASSIGNABLE_ROLE_MIN,
+    _is_auto_assignable_priority, _is_test_manager, _parse_fields,
+)
 
 
 class TestBuilderParsingTests(unittest.TestCase):
@@ -17,6 +20,12 @@ class TestBuilderParsingTests(unittest.TestCase):
     def test_test_auto_assignment_is_limited_to_non_privileged_local_roles(self):
         self.assertEqual(AUTO_ASSIGNABLE_ROLE_MIN, 1)
         self.assertEqual(AUTO_ASSIGNABLE_ROLE_MAX, 79)
+        for priority in (1, 20, 40, 79):
+            with self.subTest(priority=priority):
+                self.assertTrue(_is_auto_assignable_priority(priority))
+        for priority in (0, 80, 99, 100):
+            with self.subTest(priority=priority):
+                self.assertFalse(_is_auto_assignable_priority(priority))
 
 
 class TestManagerPermissionTests(unittest.IsolatedAsyncioTestCase):
