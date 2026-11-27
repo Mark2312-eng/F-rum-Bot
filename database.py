@@ -271,6 +271,7 @@ class Database:
                SET title = EXCLUDED.title, connected_by = EXCLUDED.connected_by""",
             chat_id, title, owner_id,
         )
+        await self.ensure_chat_roles()
 
     async def is_chat_registered(self, chat_id: int) -> bool:
         pool = self._require_pool()
@@ -440,9 +441,7 @@ class Database:
         return await pool.fetch("SELECT user_id FROM chat_moderators WHERE chat_id = $1 ORDER BY created_at", chat_id)
 
     async def is_custom_moderator(self, chat_id: int, user_id: int) -> bool:
-        pool = self._require_pool()
-        return bool(await pool.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM chat_moderators WHERE chat_id = $1 AND user_id = $2)", chat_id, user_id))
+        return await self.get_chat_member_priority(chat_id, user_id) >= 40
 
 
     async def get_system_role(self, user_id: int) -> str | None:
