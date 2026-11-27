@@ -21,7 +21,9 @@ class SystemRoleTests(unittest.IsolatedAsyncioTestCase):
     def test_role_keys_and_title_aliases(self):
         self.assertEqual(role_key("project_team"), "project_team")
         self.assertEqual(role_key("Специальный администратор"), "special_admin")
-        self.assertEqual(role_key("chief-admin"), "chief_admin")\n        self.assertEqual(role_key("Главный администратор"), "head_administrator")\n        self.assertEqual(role_key("Администратор"), "administrator")
+        self.assertEqual(role_key("chief-admin"), "chief_admin")
+        self.assertEqual(role_key("Главный администратор"), "head_administrator")
+        self.assertEqual(role_key("Администратор"), "administrator")
         self.assertEqual(role_key("директор_бота"), "director")
         self.assertEqual(role_key("владелец_проекта"), "owner")
         self.assertIsNone(role_key("unknown_role"))
@@ -34,7 +36,8 @@ class SystemRoleTests(unittest.IsolatedAsyncioTestCase):
     def test_role_hierarchy_requires_strictly_higher_rank(self):
         self.assertEqual(role_rank("owner"), 100)
         self.assertEqual(role_rank("project_team"), 95)
-        self.assertEqual(role_rank("moderator"), 30)\n        self.assertEqual(role_rank("chat_moderator"), 55)
+        self.assertEqual(role_rank("moderator"), 30)
+        self.assertEqual(role_rank("chat_moderator"), 55)
         self.assertEqual(role_rank(None), 0)
         self.assertTrue(can_manage_rank(60, 30))
         self.assertFalse(can_manage_rank(30, 30))
