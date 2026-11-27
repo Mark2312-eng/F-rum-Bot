@@ -301,7 +301,7 @@ async def panel_options(request: web.Request) -> web.Response:
 
 
 async def panel_config(request: web.Request) -> web.Response:
-    response = web.json_response({"bot_username": os.getenv("PANEL_BOT_USERNAME", "").lstrip("@")})
+    response = web.json_response({"bot_username": os.getenv("PANEL_BOT_USERNAME", "ViseRussiaHelpForumBot").lstrip("@")})
     return _panel_cors(request, response)
 
 
