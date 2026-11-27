@@ -72,6 +72,10 @@ async def reportclose_command(message: Message, bot: Bot, owner_id: int) -> None
 async def blacklist_command(message: Message, bot: Bot, owner_id: int) -> None:
     if not await _allowed(message, bot, owner_id):
         return
+    member = await bot.get_chat_member(message.chat.id, message.from_user.id)
+    if message.from_user.id != owner_id and member.status not in {"administrator", "creator"}:
+        await message.reply("⛔ Общий чёрный список доступен только владельцу и администраторам Telegram.")
+        return
     parts = (message.text or "").split(maxsplit=2)
     if len(parts) < 2:
         await message.reply("Формат: /blacklist add ID причина | /blacklist del ID | /blacklist list.")
@@ -135,6 +139,10 @@ async def nickname_command(message: Message, bot: Bot, owner_id: int) -> None:
 
 async def role_command(message: Message, bot: Bot, owner_id: int) -> None:
     if not await _allowed(message, bot, owner_id):
+        return
+    member = await bot.get_chat_member(message.chat.id, message.from_user.id)
+    if message.from_user.id != owner_id and member.status not in {"administrator", "creator"}:
+        await message.reply("⛔ Управлять ролями могут только владелец и администраторы Telegram.")
         return
     parts = (message.text or "").split()
     if len(parts) == 1 or parts[1].lower() == "list":
