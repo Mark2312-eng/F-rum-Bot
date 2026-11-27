@@ -226,11 +226,166 @@ async def health_check(_request: web.Request) -> web.Response:
     return web.Response(text="Telegram Bot is running!")
 
 
+def _panel_origin(request: web.Request) -> str:
+    return os.getenv("PANEL_ORIGIN", "").strip().rstrip("/")
+
+
+def _panel_cors(request: web.Request, response: web.StreamResponse) -> web.StreamResponse:
+    origin = request.headers.get("Origin", "")
+    allowed = _panel_origin(request)
+    if allowed and origin == allowed:
+        response.headers["Access-Control-Allow-Origin"] = allowed
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Vary"] = "Origin"
+    return response
+
+
+def _panel_secret() -> bytes:
+    secret = os.getenv("PANEL_SESSION_SECRET", "").strip()
+    if len(secret) < 32:
+        raise web.HTTPServiceUnavailable(text="Панель временно не настроена.")
+    return secret.encode("utf-8")
+
+
+def _telegram_login_valid(data: dict, bot_token: str) -> bool:
+    received_hash = data.get("hash")
+    if not isinstance(received_hash, str) or len(received_hash) != 64:
+        return False
+    check = {key: value for key, value in data.items() if key != "hash"}
+    if not check or any(isinstance(value, (dict, list)) for value in check.values()):
+        return False
+    data_check = "\\n".join(f"{key}={check[key]}" for key in sorted(check))
+    secret_key = hashlib.sha256(bot_token.encode("utf-8")).digest()
+    expected = hmac.new(secret_key, data_check.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, received_hash):
+        return False
+    try:
+        auth_date = int(data.get("auth_date", "0"))
+        user_id = int(data.get("id", "0"))
+    except (TypeError, ValueError):
+        return False
+    return user_id > 0 and 0 <= int(time.time()) - auth_date <= 600
+
+
+def _make_panel_session(user_id: int) -> str:
+    expires = int(time.time()) + 3600
+    payload = f"{user_id}.{expires}"
+    signature = hmac.new(_panel_secret(), payload.encode("ascii"), hashlib.sha256).hexdigest()
+    return f"{payload}.{signature}"
+
+
+def _panel_user(request: web.Request) -> int | None:
+    token = request.cookies.get("panel_session", "")
+    try:
+        user_text, expires_text, signature = token.split(".", 2)
+        payload = f"{user_text}.{expires_text}"
+        expected = hmac.new(_panel_secret(), payload.encode("ascii"), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, signature) or int(expires_text) < int(time.time()):
+            return None
+        user_id = int(user_text)
+    except (ValueError, UnicodeError, web.HTTPException):
+        return None
+    admin_id = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
+    return user_id if admin_id.isdigit() and user_id == int(admin_id) else None
+
+
+async def panel_options(request: web.Request) -> web.Response:
+    response = web.Response(status=204)
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Max-Age"] = "600"
+    return _panel_cors(request, response)
+
+
+async def panel_config(request: web.Request) -> web.Response:
+    response = web.json_response({"bot_username": os.getenv("PANEL_BOT_USERNAME", "").lstrip("@")})
+    return _panel_cors(request, response)
+
+
+async def panel_login(request: web.Request) -> web.Response:
+    if request.headers.get("Origin", "") != _panel_origin(request) or not _panel_origin(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
+    try:
+        data = await request.json()
+    except (ValueError, json.JSONDecodeError):
+        raise web.HTTPBadRequest(text="Некорректные данные авторизации.")
+    if not isinstance(data, dict):
+        raise web.HTTPBadRequest(text="Некорректные данные авторизации.")
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    admin_id = os.getenv("ADMIN_TELEGRAM_ID", "").strip()
+    if not bot_token or not admin_id.isdigit() or not _telegram_login_valid(data, bot_token):
+        raise web.HTTPUnauthorized(text="Не удалось подтвердить вход через Telegram.")
+    if int(data.get("id", 0)) != int(admin_id):
+        raise web.HTTPForbidden(text="Этот аккаунт не имеет доступа к панели.")
+    response = web.json_response({"ok": True})
+    response.set_cookie(
+        "panel_session", _make_panel_session(int(admin_id)),
+        max_age=3600, httponly=True, secure=True, samesite="None", path="/",
+    )
+    return _panel_cors(request, response)
+
+
+async def panel_me(request: web.Request) -> web.Response:
+    user_id = _panel_user(request)
+    response = web.json_response({"authenticated": user_id is not None, "user_id": user_id})
+    return _panel_cors(request, response)
+
+
+async def panel_logout(request: web.Request) -> web.Response:
+    response = web.json_response({"ok": True})
+    response.del_cookie("panel_session", path="/", secure=True, httponly=True, samesite="None")
+    return _panel_cors(request, response)
+
+
+async def panel_dashboard(request: web.Request) -> web.Response:
+    user_id = _panel_user(request)
+    if user_id is None:
+        response = web.json_response({"error": "Требуется авторизация."}, status=401)
+        return _panel_cors(request, response)
+    pool = database._require_pool()
+    chats = await pool.fetch(
+        "SELECT chat_id, title, moderation_mode, created_at FROM registered_chats ORDER BY title"
+    )
+    tests = await pool.fetch(
+        """SELECT t.id, t.title, t.chat_id, t.role_key, t.pass_score, t.is_active,
+                  t.created_at, COUNT(r.id) AS attempts,
+                  COUNT(r.id) FILTER (WHERE r.passed) AS passed_count
+           FROM moderation_tests t LEFT JOIN moderation_test_results r ON r.test_id = t.id
+           GROUP BY t.id ORDER BY t.created_at DESC LIMIT 100"""
+    )
+    recent = await pool.fetch(
+        """SELECT r.test_id, r.user_id, r.score_percent, r.passed, r.role_assigned, r.created_at,
+                  t.title AS test_title
+           FROM moderation_test_results r JOIN moderation_tests t ON t.id = r.test_id
+           ORDER BY r.created_at DESC LIMIT 50"""
+    )
+    payload = {
+        "chats": [{"chat_id": row["chat_id"], "title": row["title"],
+                   "moderation_mode": row["moderation_mode"]} for row in chats],
+        "tests": [{"id": row["id"], "title": row["title"], "chat_id": row["chat_id"],
+                   "role_key": row["role_key"], "pass_score": row["pass_score"],
+                   "is_active": row["is_active"], "attempts": row["attempts"],
+                   "passed_count": row["passed_count"]} for row in tests],
+        "results": [{"test_id": row["test_id"], "test_title": row["test_title"],
+                     "user_id": row["user_id"], "score_percent": row["score_percent"],
+                     "passed": row["passed"], "role_assigned": row["role_assigned"],
+                     "created_at": row["created_at"].isoformat()} for row in recent],
+    }
+    response = web.json_response(payload)
+    return _panel_cors(request, response)
+
+
 async def start_web_server(port: int) -> web.AppRunner:
-    """Start the lightweight health-check server."""
+    """Start health-check and authenticated admin-panel API endpoints."""
     app = web.Application()
     app.router.add_get("/", health_check)
     app.router.add_get("/health", health_check)
+    app.router.add_route("OPTIONS", "/api/{tail:.*}", panel_options)
+    app.router.add_get("/api/config", panel_config)
+    app.router.add_post("/api/auth/telegram", panel_login)
+    app.router.add_get("/api/me", panel_me)
+    app.router.add_post("/api/logout", panel_logout)
+    app.router.add_get("/api/dashboard", panel_dashboard)
     runner = web.AppRunner(app, access_log=LOGGER)
     await runner.setup()
 
@@ -241,7 +396,7 @@ async def start_web_server(port: int) -> web.AppRunner:
         await runner.cleanup()
         raise
 
-    LOGGER.info("Health-check server is listening on 0.0.0.0:%s", port)
+    LOGGER.info("Health-check and admin API server listening on 0.0.0.0:%s", port)
     return runner
 
 
