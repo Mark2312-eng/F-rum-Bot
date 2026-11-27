@@ -1,6 +1,9 @@
 """Telegram moderation bot for VISE RUSSIA XenForo community."""
 
 import asyncio
+import hashlib
+import hmac
+import json
 import logging
 import os
 import time
