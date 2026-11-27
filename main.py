@@ -18,7 +18,7 @@ from database import database
 from moderation import ban_member, clear_warnings, kick_member, moderate_message, mute_member, owner_summary, purge_messages, register_group, show_moderation_log, show_moderation_stats, show_warnings, unban_member, unmute_member, warn_member
 from group_settings import apply_setting_callback, show_group_settings
 from advanced_moderation import blacklist_command, nickname_command, report_command, reportclose_command, reports_command, role_command
-from system_roles import staff_command, myrole_command, staffinfo_command, setrole_command, staffremove_command, stafflog_command, rolehelp_command
+from system_roles import staff_command, myrole_command, staffinfo_command, setrole_command, staffremove_command, stafflog_command, rolehelp_command, syshealth_command, reporthelp_command
 
 load_dotenv()
 
@@ -763,6 +763,16 @@ async def system_rolehelp_handler(message: Message) -> None:
     await rolehelp_command(message, owner_id)
 
 
+async def system_syshealth_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await syshealth_command(message, owner_id)
+
+
+async def system_reporthelp_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await reporthelp_command(message, owner_id)
+
+
 def create_dispatcher() -> Dispatcher:
     """Configure the moderation-first Telegram dispatcher."""
     dispatcher = Dispatcher()
@@ -800,6 +810,8 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(system_staffremove_handler, Command("staffremove"))
     dispatcher.message.register(system_stafflog_handler, Command("stafflog"))
     dispatcher.message.register(system_rolehelp_handler, Command("rolehelp"))
+    dispatcher.message.register(system_syshealth_handler, Command("syshealth"))
+    dispatcher.message.register(system_reporthelp_handler, Command("reporthelp"))
     dispatcher.message.register(button_input_handler, lambda message: bool(message.from_user and message.from_user.id in PENDING_INPUTS))
     dispatcher.message.register(group_moderation_handler)
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
@@ -854,6 +866,8 @@ async def main() -> None:
             BotCommand(command="staffremove", description="Снять системную должность"),
             BotCommand(command="stafflog", description="Журнал назначений"),
             BotCommand(command="rolehelp", description="Справка по должностям"),
+            BotCommand(command="syshealth", description="Техническая диагностика"),
+            BotCommand(command="reporthelp", description="Регламент поддержки"),
             BotCommand(command="warn", description="Выдать предупреждение"),
             BotCommand(command="warns", description="Проверить предупреждения"),
             BotCommand(command="clearwarns", description="Сбросить предупреждения"),
