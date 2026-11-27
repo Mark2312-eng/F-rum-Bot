@@ -250,6 +250,7 @@ class Database:
                     PRIMARY KEY (test_id, user_id)
                 );
             """)
+        await self.ensure_chat_roles()
 
     async def close(self) -> None:
         if self.pool is not None:
