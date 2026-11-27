@@ -21,7 +21,7 @@ from group_settings import apply_setting_callback, show_group_settings
 from advanced_moderation import blacklist_command, nickname_command, report_command, reportclose_command, reports_command, role_command
 from system_roles import staff_command, myrole_command, staffinfo_command, setrole_command, staffremove_command, stafflog_command, rolehelp_command, syshealth_command, reporthelp_command
 from testing import create_test_command, add_question_command, send_test_command, test_results_command, handle_test_start, test_answer_callback
-from chat_roles import roles_command, newrole_command, delrole_command, set_chat_role_command, remove_chat_role_command, editcmd_command, gm_command
+from chat_roles import roles_command, newrole_command, delrole_command, set_chat_role_command, remove_chat_role_command, editcmd_command, gm_command, command_permissions_command
 from user_stats import ChatActivityMiddleware, user_stats_command
 from group_info import admins_command, chatinfo_command, rules_command, setrules_command
 
@@ -468,6 +468,7 @@ async def cmd_help(message: Message) -> None:
         "/chatinfo — информация о группе\n"
         "/rules — правила группы\n"
         "/setrules ТЕКСТ — установить правила (для администраторов)\n"
+        "/cmdperms — список порогов доступа к командам\\n"
         "⚙️ <b>Настройки и обращения</b>\n"
         "/settings — антифлуд и политика ссылок\n"
         "/report ПРИЧИНА — пожаловаться (ответом на сообщение)\n"
@@ -959,6 +960,11 @@ async def chat_editcmd_handler(message: Message) -> None:
     await editcmd_command(message, owner_id)
 
 
+async def chat_cmdperms_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await command_permissions_command(message, owner_id)
+
+
 async def chat_gm_handler(message: Message) -> None:
     owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
     await gm_command(message, owner_id)
@@ -1042,6 +1048,8 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(chat_setrole_handler, Command("chatrole"))
     dispatcher.message.register(chat_removerole_handler, Command("removerole"))
     dispatcher.message.register(chat_editcmd_handler, Command("editcmd"))
+    dispatcher.message.register(chat_cmdperms_handler, Command("cmdperms"))
+    dispatcher.message.register(chat_cmdperms_handler, lambda message: bool(message.text and message.text.strip() == "!cmdperms"))
     dispatcher.message.register(chat_gm_handler, Command("gm"))
     dispatcher.message.register(chat_roles_handler, lambda message: bool(message.text and message.text.strip() == "!roles"))
     dispatcher.message.register(chat_newrole_handler, lambda message: bool(message.text and message.text.startswith("!newrole ")))
@@ -1121,6 +1129,7 @@ async def main() -> None:
             BotCommand(command="chatrole", description="Назначить роль участнику"),
             BotCommand(command="removerole", description="Снять роль участника"),
             BotCommand(command="editcmd", description="Изменить порог команды"),
+            BotCommand(command="cmdperms", description="Просмотр прав на команды"),
             BotCommand(command="gm", description="Управление иммунитетом"),
             BotCommand(command="warn", description="Выдать предупреждение"),
             BotCommand(command="warns", description="Проверить предупреждения"),
