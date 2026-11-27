@@ -7,7 +7,6 @@ import aiohttp
 
 from moderation import (
     _flood_notice_times,
-    _last_flood_sweep,
     _message_times,
     cleanup_flood_state,
     should_notify_flood,
