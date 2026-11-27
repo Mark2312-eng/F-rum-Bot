@@ -186,7 +186,8 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
                     until_date=int(time.time()) + 300,
                 )
                 await database.log_moderation_event(
-                    message.chat.id, None, message.from_user.id, "link_mute", "5 минут"
+                    message.chat.id, None, message.from_user.id, "link_mute",
+                    "5 минут; автоматически по политике ссылок группы"
                 )
                 await message.answer(
                     f"🔇 {message.from_user.mention_html()}, отправка ссылок запрещена. Ограничение на 5 минут.",
@@ -326,7 +327,7 @@ def parse_moderation_reason(
     arguments = parts[1:] if parts else []
     if target_argument and not message.reply_to_message and arguments:
         arguments = arguments[1:]
-    if count_argument and arguments:
+    if count_argument and arguments and arguments[0].isdigit():
         arguments = arguments[1:]
     if duration_argument and arguments and arguments[0].lower() in MUTE_DURATIONS:
         arguments = arguments[1:]
