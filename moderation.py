@@ -19,6 +19,37 @@ LINK_POLICIES = {"allow", "block", "mute"}
 WARNING_LIMIT = 3
 
 _message_times: dict[tuple[int, int], deque[float]] = defaultdict(deque)
+_flood_notice_times: dict[tuple[int, int], float] = {}
+_last_flood_sweep = 0.0
+FLOOD_NOTICE_COOLDOWN_SECONDS = 30
+FLOOD_STATE_SWEEP_SECONDS = 60
+
+
+def cleanup_flood_state(now: float) -> None:
+    """Bound in-memory flood tracking by dropping inactive users periodically."""
+    global _last_flood_sweep
+    if now - _last_flood_sweep < FLOOD_STATE_SWEEP_SECONDS:
+        return
+    _last_flood_sweep = now
+    stale_before = now - FLOOD_WINDOW_SECONDS
+    for key, history in list(_message_times.items()):
+        while history and history[0] <= stale_before:
+            history.popleft()
+        if not history:
+            _message_times.pop(key, None)
+    notice_stale_before = now - FLOOD_NOTICE_COOLDOWN_SECONDS
+    for key, notified_at in list(_flood_notice_times.items()):
+        if notified_at <= notice_stale_before:
+            _flood_notice_times.pop(key, None)
+
+
+def should_notify_flood(key: tuple[int, int], now: float) -> bool:
+    """Throttle repeated flood warnings per user and chat."""
+    last_notice = _flood_notice_times.get(key)
+    if last_notice is not None and now - last_notice < FLOOD_NOTICE_COOLDOWN_SECONDS:
+        return False
+    _flood_notice_times[key] = now
+    return True
 
 
 def is_group(message: Message) -> bool:
@@ -177,6 +208,7 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
 
     key = (message.chat.id, message.from_user.id)
     now = time.monotonic()
+    cleanup_flood_state(now)
     history = _message_times[key]
     while history and now - history[0] > FLOOD_WINDOW_SECONDS:
         history.popleft()
@@ -187,10 +219,11 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
             await database.log_moderation_event(
                 message.chat.id, None, message.from_user.id, "flood_delete"
             )
-            await message.answer(
-                f"⏳ {message.from_user.mention_html()}, слишком много сообщений подряд. Сделай небольшую паузу.",
-                parse_mode="HTML",
-            )
+            if should_notify_flood(key, now):
+                await message.answer(
+                    f"⏳ {message.from_user.mention_html()}, слишком много сообщений подряд. Сделай небольшую паузу.",
+                    parse_mode="HTML",
+                )
         except Exception:
             return
 
