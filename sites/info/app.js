@@ -196,17 +196,27 @@
   };
 
   const mountTelegramLogin = async () => {
-    const config = await fetch('https://f-rum-bot.onrender.com/api/config').then(response => response.json());
-    const script = document.createElement('script');
-    script.src = 'https://telegram.org/js/telegram-widget.js?22';
-    script.async = true;
-    script.dataset.telegramLogin = String(config.bot_username || 'ViseRussiaHelpForumBot').replace(/^@/, '');
-    script.dataset.size = 'large';
-    script.dataset.userpic = 'false';
-    script.dataset.requestAccess = 'write';
-    script.dataset.onauth = 'onTelegramAuth(user)';
-    document.getElementById('telegramLoginWidget').appendChild(script);
+    const host = document.getElementById('telegramLoginWidget');
+    host.innerHTML = '<button class="button button-primary support-login-button" type="button">Войти через Telegram <span>↗</span></button>';
+    host.querySelector('button').addEventListener('click', () => {
+      const popup = window.open(
+        'https://f-rum-bot-panel.onrender.com/support-login.html',
+        'fRumTelegramLogin',
+        'width=520,height=620,resizable=yes,scrollbars=yes'
+      );
+      if (!popup) {
+        const hint = document.querySelector('.support-hint');
+        if (hint) hint.textContent = 'Браузер заблокировал окно входа. Разрешите всплывающие окна для сайта и повторите попытку.';
+      }
+    });
   };
+
+  window.addEventListener('message', event => {
+    if (event.origin !== 'https://f-rum-bot-panel.onrender.com' ||
+        event.data?.type !== 'f-rum-support-auth' ||
+        !event.data.user) return;
+    window.onTelegramAuth(event.data.user);
+  });
 
   if (supportAuth) {
     supportRequest('/me').then(async data => {
