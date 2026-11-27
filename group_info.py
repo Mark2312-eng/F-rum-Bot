@@ -38,7 +38,7 @@ async def admins_command(message: Message, bot: Bot) -> None:
         lines.append(f"• {role}: {name}{username} · <code>{user.id}</code>")
     if len(lines) == 2:
         lines.append("Администраторы не найдены.")
-    await message.answer("\\n".join(lines), parse_mode="HTML")
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 async def chatinfo_command(message: Message, bot: Bot) -> None:
@@ -66,7 +66,7 @@ async def chatinfo_command(message: Message, bot: Bot) -> None:
     ]
     if chat.username:
         lines.insert(3, f"Публичная ссылка: @{escape(chat.username)}")
-    await message.answer("\\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+    await message.answer("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
 
 
 async def rules_command(message: Message) -> None:
@@ -76,7 +76,7 @@ async def rules_command(message: Message) -> None:
     if not rules:
         await message.answer("📜 Правила этой группы пока не установлены.")
         return
-    await message.answer(f"📜 <b>Правила группы</b>\\n\\n{escape(rules)}", parse_mode="HTML")
+    await message.answer(f"📜 <b>Правила группы</b>\n\n{escape(rules)}", parse_mode="HTML")
 
 
 async def setrules_command(message: Message, bot: Bot, owner_id: int) -> None:
