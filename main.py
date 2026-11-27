@@ -370,6 +370,25 @@ async def fetch_forum_stats(session: aiohttp.ClientSession, forum_url: str, api_
     return payload
 
 
+async def ping_command(message: Message) -> None:
+    """Check bot responsiveness and PostgreSQL connectivity."""
+    started = time.perf_counter()
+    try:
+        pool = database._require_pool()
+        await pool.fetchval("SELECT 1")
+    except Exception:
+        LOGGER.exception("Ping database check failed")
+        await message.answer("🏓 Бот отвечает.\n🗄 База данных: недоступна.")
+        return
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    await message.answer(
+        "🏓 <b>Pong!</b> Бот работает.\n"
+        "🗄 База данных: доступна.\n"
+        f"⏱ Проверка БД: <b>{elapsed_ms:.0f} мс</b>",
+        parse_mode="HTML",
+    )
+
+
 async def send_forum_stats(message: Message) -> None:
     api_key = os.getenv("XF_API_KEY", "").strip()
     if not api_key:
@@ -899,7 +918,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(cmd_help, Command("help"))
     dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
-    dispatcher.message.register(send_forum_stats, Command("stats"))
+    dispatcher.message.register(send_forum_stats, Command("forumstats"))\n    dispatcher.message.register(ping_command, lambda message: bool(message.text and message.text.split("@", 1)[0].strip().lower() == "/ping"))
     dispatcher.message.register(cmd_owner, Command("owner"))
     dispatcher.message.register(cmd_myid, Command("myid"))
     dispatcher.message.register(cmd_chats, Command("chats"))
@@ -998,7 +1017,7 @@ async def main() -> None:
             BotCommand(command="help", description="Список команд"),
             BotCommand(command="profile", description="Профиль форума"),
             BotCommand(command="punish", description="Проверить наказание"),
-            BotCommand(command="stats", description="Статистика форума"),
+            BotCommand(command="forumstats", description="Статистика форума"),\n            BotCommand(command="ping", description="Проверить работу бота"),
             BotCommand(command="connect", description="Подключить группу"),
             BotCommand(command="settings", description="Настройки модерации"),
             BotCommand(command="modlog", description="Журнал модерации"),
