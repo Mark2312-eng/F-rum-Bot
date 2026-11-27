@@ -243,6 +243,20 @@ def _panel_cors(request: web.Request, response: web.StreamResponse) -> web.Strea
     return response
 
 
+@web.middleware
+async def panel_cors_middleware(
+    request: web.Request, handler
+) -> web.StreamResponse:
+    """Keep CORS headers on API errors so browsers can read the real response."""
+    try:
+        response = await handler(request)
+    except web.HTTPException as exc:
+        response = exc
+    if request.path.startswith("/api/"):
+        _panel_cors(request, response)
+    return response
+
+
 def _panel_secret() -> bytes:
     secret = os.getenv("PANEL_SESSION_SECRET", "").strip()
     if len(secret) < 32:
@@ -380,7 +394,7 @@ async def panel_dashboard(request: web.Request) -> web.Response:
 
 async def start_web_server(port: int) -> web.AppRunner:
     """Start health-check and authenticated admin-panel API endpoints."""
-    app = web.Application()
+    app = web.Application(middlewares=[panel_cors_middleware])
     app.router.add_get("/", health_check)
     app.router.add_get("/health", health_check)
     app.router.add_route("OPTIONS", "/api/{tail:.*}", panel_options)
