@@ -116,10 +116,11 @@ async def blacklist_command(message: Message, bot: Bot, owner_id: int) -> None:
     user_id = int(parts[2].split()[0])
     if action == "add":
         reason = parts[2][len(str(user_id)):].strip()[:300] or "Причина не указана"
-        await database.add_blacklist(user_id, message.from_user.id, reason)
-        await message.answer(f"⛔ Пользователь <code>{user_id}</code> добавлен в общий чёрный список.", parse_mode="HTML")
+        action_result = await database.add_blacklist(user_id, message.from_user.id, reason)
+        verb = "добавлен" if action_result == "add" else "обновлён"
+        await message.answer(f"⛔ Пользователь <code>{user_id}</code> {verb} в общем чёрном списке.", parse_mode="HTML")
     elif action == "del":
-        removed = await database.remove_blacklist(user_id)
+        removed = await database.remove_blacklist(user_id, message.from_user.id)
         await message.answer("✅ Запись удалена." if removed else "Пользователь не найден в списке.")
     else:
         await message.reply("Доступно: add, del, list.")
