@@ -214,6 +214,8 @@ class ConsentGateMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         user = getattr(event, "from_user", None)
         chat = getattr(event, "chat", None)
+        if chat is None and isinstance(event, CallbackQuery) and event.message:
+            chat = event.message.chat
         is_private = bool(chat and getattr(chat, "type", None) == "private")
         if not is_private or user is None:
             return await handler(event, data)
@@ -367,7 +369,7 @@ def register_privacy_broadcast_handlers(dispatcher: Dispatcher) -> None:
         capture_broadcast_content,
         lambda message: bool(message.from_user and message.from_user.id == _owner_id()
                              and _owner_id() in _PENDING_BROADCASTS
-                             and message.text and not message.text.startswith("/broadcast")),
+                             and not (message.text and message.text.startswith("/broadcast"))),
     )
     dispatcher.callback_query.register(consent_callback, F.data.startswith("consent:"))
     dispatcher.callback_query.register(subscription_callback, F.data.startswith("subscription:"))
