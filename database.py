@@ -137,7 +137,7 @@ class Database:
                     assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     PRIMARY KEY (chat_id, user_id),
                     FOREIGN KEY (chat_id, role_key)
-                        REFERENCES chat_role_definitions(chat_id, role_key) ON DELETE RESTRICT
+                        REFERENCES chat_role_definitions(chat_id, role_key) ON DELETE CASCADE
                 );
                 CREATE INDEX IF NOT EXISTS chat_member_roles_role_idx
                     ON chat_member_roles (chat_id, role_key);
