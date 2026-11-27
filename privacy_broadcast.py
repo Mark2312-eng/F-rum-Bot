@@ -20,6 +20,7 @@ PUBLIC_SITE = os.getenv("PUBLIC_SITE_ORIGIN", "https://f-rum-bot-info.onrender.c
 PRIVACY_URL = f"{PUBLIC_SITE}/privacy.html"
 PERSONAL_DATA_URL = f"{PUBLIC_SITE}/personal-data.html"
 _PENDING_BROADCASTS: dict[int, tuple[int, int]] = {}
+_ACTIVE_BROADCASTS: set[int] = set()
 
 
 def _owner_id() -> int:
@@ -292,6 +293,11 @@ async def broadcast_callback(callback: CallbackQuery) -> None:
         return
     data = callback.data or ""
     await callback.answer()
+    if data == "broadcast:stop":
+        _ACTIVE_BROADCASTS.discard(owner_id)
+        if callback.message:
+            await callback.message.answer("⏹ Запрошена остановка рассылки.")
+        return
     if data == "broadcast:cancel":
         _PENDING_BROADCASTS.pop(owner_id, None)
         if callback.message:
@@ -318,8 +324,15 @@ async def broadcast_callback(callback: CallbackQuery) -> None:
         owner_id,
     )
     sent = failed = 0
+    _ACTIVE_BROADCASTS.add(owner_id)
     bot: Bot = callback.bot
+    if callback.message:
+        await callback.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏹ Остановить рассылку", callback_data="broadcast:stop")]
+        ]))
     for row in recipients:
+        if owner_id not in _ACTIVE_BROADCASTS:
+            break
         try:
             await bot.copy_message(
                 chat_id=int(row["user_id"]),
@@ -341,11 +354,13 @@ async def broadcast_callback(callback: CallbackQuery) -> None:
         except TelegramAPIError:
             failed += 1
         await asyncio.sleep(0.05)
+    was_cancelled = owner_id not in _ACTIVE_BROADCASTS
+    _ACTIVE_BROADCASTS.discard(owner_id)
     await pool.execute(
-        """UPDATE bot_broadcast_history SET status = 'completed',
-           sent_count = $2, failed_count = $3, completed_at = NOW()
+        """UPDATE bot_broadcast_history SET status = $2,
+           sent_count = $3, failed_count = $4, completed_at = NOW()
            WHERE id = $1""",
-        history_id, sent, failed,
+        history_id, "cancelled" if was_cancelled else "completed", sent, failed,
     )
     if callback.message:
         await callback.message.edit_reply_markup(reply_markup=None)
@@ -353,7 +368,8 @@ async def broadcast_callback(callback: CallbackQuery) -> None:
             "✅ <b>Рассылка завершена</b>\n"
             f"Успешно отправлено: <b>{sent}</b>\n"
             f"Ошибок: <b>{failed}</b>\n"
-            f"Всего получателей: <b>{len(recipients)}</b>",
+            f"Всего получателей: <b>{len(recipients)}</b>\n"
+            + ("⏹ Рассылка остановлена владельцем." if was_cancelled else ""),
             parse_mode="HTML",
         )
 
@@ -369,7 +385,7 @@ def register_privacy_broadcast_handlers(dispatcher: Dispatcher) -> None:
         capture_broadcast_content,
         lambda message: bool(message.from_user and message.from_user.id == _owner_id()
                              and _owner_id() in _PENDING_BROADCASTS
-                             and not (message.text and message.text.startswith("/broadcast"))),
+                             and (message.content_type != "text" or not (message.text or "").startswith("/"))),
     )
     dispatcher.callback_query.register(consent_callback, F.data.startswith("consent:"))
     dispatcher.callback_query.register(subscription_callback, F.data.startswith("subscription:"))
