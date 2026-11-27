@@ -7,6 +7,7 @@ from unittest.mock import patch
 from vip_stars import (
     TIERS,
     build_shop_text,
+    _compare_text,
     tier_price,
     vip_shop_keyboard,
 )
@@ -63,6 +64,26 @@ class VipStarsConfigurationTests(unittest.TestCase):
         self.assertEqual(set(TIERS), {"silver", "gold", "diamond"})
         self.assertTrue(any("/vipname" in perk for perk in TIERS["gold"]["perks"]))
         self.assertTrue(any("/viptitle" in perk for perk in TIERS["diamond"]["perks"]))
+
+    def test_comparison_uses_configured_prices(self):
+        values = {
+            "VIP_SILVER_PRICE_STARS": "31",
+            "VIP_GOLD_PRICE_STARS": "62",
+            "VIP_DIAMOND_PRICE_STARS": "124",
+        }
+        with patch.dict(os.environ, values, clear=True):
+            text = _compare_text()
+        self.assertIn("Silver · 31 ⭐", text)
+        self.assertIn("Gold · 62 ⭐", text)
+        self.assertIn("Diamond · 124 ⭐", text)
+
+    def test_comparison_marks_unconfigured_prices_unavailable(self):
+        with patch.dict(os.environ, {}, clear=True):
+            text = _compare_text()
+        self.assertEqual(text.count("временно недоступен"), 3)
+        self.assertNotIn("25 ⭐", text)
+        self.assertNotIn("50 ⭐", text)
+        self.assertNotIn("100 ⭐", text)
 
 
 if __name__ == "__main__":
