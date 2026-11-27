@@ -52,7 +52,9 @@ async def is_moderator(message: Message, bot: Bot, owner_id: int) -> bool:
         return False
     if message.from_user.id == owner_id:
         return True
-    return await is_chat_admin(bot, message.chat.id, message.from_user.id)
+    if await is_chat_admin(bot, message.chat.id, message.from_user.id):
+        return True
+    return await database.is_custom_moderator(message.chat.id, message.from_user.id)
 
 
 async def register_group(message: Message, bot: Bot, owner_id: int) -> None:
@@ -74,6 +76,14 @@ async def moderate_message(message: Message, bot: Bot, owner_id: int) -> None:
     if not await database.is_chat_registered(message.chat.id):
         return
     if message.from_user.id == owner_id:
+        return
+    if await database.is_blacklisted(message.from_user.id):
+        try:
+            await message.delete()
+            await bot.ban_chat_member(message.chat.id, message.from_user.id)
+            await database.log_moderation_event(message.chat.id, None, message.from_user.id, "global_blacklist_ban")
+        except Exception:
+            return
         return
     if await is_chat_admin(bot, message.chat.id, message.from_user.id):
         return
