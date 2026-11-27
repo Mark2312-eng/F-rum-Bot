@@ -506,7 +506,7 @@ async def start_web_server(port: int) -> web.AppRunner:
     app.router.add_post("/api/logout", panel_logout)
     app.router.add_get("/api/dashboard", panel_dashboard)
     app.router.add_get("/api/moderation", panel_moderation)
-    app.router.add_post("/api/reports/{report_id:\\d+}/close", panel_close_report)
+    app.router.add_post("/api/reports/{report_id:[0-9]+}/close", panel_close_report)
     runner = web.AppRunner(app, access_log=LOGGER)
     await runner.setup()
 
