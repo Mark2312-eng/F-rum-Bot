@@ -420,6 +420,7 @@ async def cmd_help(message: Message) -> None:
         "/editcmd КОМАНДА ПРИОРИТЕТ — изменить порог (80+)\n"
         "/gm ID on|off — иммунитет (80+)\n"
         "!newrole, !delrole, !roles, !setrole, !removerole, !editcmd, !gm — короткие варианты\n"
+        "!warn, !mute, !unmute, !ban, !unban, !kick, !purge — короткие команды модерации\n"
         "/connect — подключить группу (владелец бота).\n\n"
         "Команды модерации доступны владельцу и администраторам подключённой группы. "
         "Боту нужны права администратора.",
