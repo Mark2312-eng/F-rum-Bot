@@ -71,8 +71,8 @@ async def ensure_privacy_schema() -> None:
 async def has_consent(user_id: int) -> bool:
     pool = database._require_pool()
     return bool(await pool.fetchval(
-        "SELECT EXISTS(SELECT 1 FROM bot_user_consents WHERE user_id = $1)",
-        user_id,
+        "SELECT EXISTS(SELECT 1 FROM bot_user_consents WHERE user_id = $1 AND consent_version = $2)",
+        user_id, CONSENT_VERSION,
     ))
 
 
