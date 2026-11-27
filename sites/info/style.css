@@ -2,3 +2,44 @@
 @media(max-width:900px){.hero{grid-template-columns:1fr;padding-top:75px}.hero-visual{height:400px;margin-top:20px}.hero-copy{max-width:700px}.workflow-inner{gap:45px}.trust-strip{flex-wrap:wrap;justify-content:center}.feature-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:620px){.site-header{height:70px;padding:0 18px}.brand{font-size:17px}.brand-mark{width:33px;height:33px}.brand small{font-size:6px}.desktop-nav{display:none}.header-cta{padding:10px 12px;font-size:10px}.hero{padding:66px 21px 65px;min-height:0}.hero h1{font-size:clamp(45px,12vw,64px);letter-spacing:-3px}.hero-lead{font-size:13px}.hero-meta{margin-top:38px;font-size:8px;gap:9px}.hero-visual{height:340px;margin:15px -13px 0;transform:scale(.92)}.visual-core{width:155px;height:155px}.core-symbol{font-size:50px}.float-card{min-width:160px;padding:10px}.float-top{left:0;top:22px}.float-right{right:-3px;top:145px}.float-bottom{left:3px;bottom:28px}.visual-caption{font-size:7px;right:8px}.hero-index{left:21px;bottom:18px}.trust-strip{gap:13px 20px;font-size:8px;padding:18px}.section{padding:78px 21px}.section-heading{display:block;margin-bottom:32px}.section-heading h2,.workflow-section h2,.closing-cta h2{font-size:38px;letter-spacing:-2px}.section-intro{margin-top:20px;font-size:12px}.feature-grid{grid-template-columns:1fr}.feature-large{grid-column:auto}.feature-card{min-height:235px}.workflow-inner{padding:78px 21px;grid-template-columns:1fr;gap:40px}.workflow-lead{font-size:12px}.steps article{grid-template-columns:32px 1fr 15px;gap:10px}.command-list>div{grid-template-columns:112px 1fr;gap:9px;padding:15px 10px}.command-list code{font-size:11px}.command-list span{font-size:10px}.command-list small{display:none}.closing-cta{padding:78px 20px}.closing-cta p:not(.eyebrow){font-size:12px}footer{padding:25px 20px;align-items:flex-start;flex-direction:column;gap:17px}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{transition:none!important}}
+
+/* Mobile navigation and layout refinements */
+.mobile-nav{display:none;position:relative}
+.mobile-nav summary{list-style:none;cursor:pointer;border:1px solid #334b6a;border-radius:5px;padding:9px 11px;color:var(--text);font-size:11px;white-space:nowrap}
+.mobile-nav summary::-webkit-details-marker{display:none}
+.mobile-nav summary span{color:var(--accent);padding-left:6px}
+.mobile-nav nav{position:absolute;right:0;top:calc(100% + 10px);min-width:190px;padding:8px;background:#101b2c;border:1px solid #304763;border-radius:8px;box-shadow:0 16px 40px rgba(0,0,0,.4);display:grid;gap:2px;z-index:30}
+.mobile-nav nav a{padding:12px;color:var(--text);font-size:12px;text-decoration:none;border-radius:5px}
+.mobile-nav nav a:hover,.mobile-nav nav a:focus-visible{background:#1a2d45;color:var(--accent2)}
+a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.hero-art{height:auto;aspect-ratio:5/3}
+.command-list>div{min-width:0}
+.command-list span{line-height:1.55}
+@media(max-width:900px){.hero{min-height:0;padding-top:72px;padding-bottom:76px}.hero-visual{min-width:0}}
+@media(max-width:760px){
+.site-header{gap:10px;padding-left:16px;padding-right:16px}
+.desktop-nav{display:none}
+.mobile-nav{display:block;margin-left:auto}
+.header-cta{padding:10px 11px;font-size:10px;white-space:nowrap}
+.header-cta span{padding-left:5px}
+.brand{font-size:16px;gap:8px}
+.brand small{letter-spacing:.7px}
+}
+@media(max-width:620px){
+.hero{padding-top:54px}
+.hero-visual{height:auto;min-height:0;margin:20px 0 8px;transform:none}
+.hero-art{width:100%;max-height:none;border-radius:12px}
+.hero-index{bottom:16px}
+.command-list>div{grid-template-columns:minmax(82px,.42fr) minmax(0,1fr);gap:12px;padding:14px 8px}
+.command-list code{font-size:10px;overflow-wrap:anywhere}
+.command-list span{font-size:10px}
+}
+@media(max-width:380px){
+.site-header{padding-left:12px;padding-right:12px;gap:7px}
+.brand{font-size:14px;gap:6px}
+.brand-mark{width:29px;height:29px;font-size:16px}
+.brand small{font-size:5px;letter-spacing:.45px}
+.mobile-nav summary{font-size:10px;padding:8px}
+.header-cta{font-size:9px;padding:9px 8px}
+.hero h1{font-size:43px;letter-spacing:-2.6px}
+}
