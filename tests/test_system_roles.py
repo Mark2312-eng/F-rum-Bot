@@ -21,7 +21,7 @@ class SystemRoleTests(unittest.IsolatedAsyncioTestCase):
     def test_role_keys_and_title_aliases(self):
         self.assertEqual(role_key("project_team"), "project_team")
         self.assertEqual(role_key("Специальный администратор"), "special_admin")
-        self.assertEqual(role_key("chief-admin"), "chief_admin")
+        self.assertEqual(role_key("chief-admin"), "chief_admin")\n        self.assertEqual(role_key("Главный администратор"), "head_administrator")\n        self.assertEqual(role_key("Администратор"), "administrator")
         self.assertEqual(role_key("директор_бота"), "director")
         self.assertEqual(role_key("владелец_проекта"), "owner")
         self.assertIsNone(role_key("unknown_role"))
