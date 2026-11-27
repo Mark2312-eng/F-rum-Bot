@@ -55,9 +55,10 @@ def settings_text(settings: dict[str, str]) -> str:
 
 
 async def _authorized(chat_id: int, user_id: int, bot: Bot, owner_id: int) -> bool:
-    if user_id == owner_id:
+    if user_id == owner_id or await is_chat_admin(bot, chat_id, user_id):
         return True
-    return await is_chat_admin(bot, chat_id, user_id)
+    from system_roles import has_permission
+    return await has_permission(user_id, owner_id, "settings")
 
 
 async def show_group_settings(message: Message, bot: Bot, owner_id: int) -> None:
