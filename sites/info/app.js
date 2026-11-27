@@ -282,7 +282,7 @@
       applicationHistory.innerHTML = data.applications.length ? data.applications.map(item =>
         '<article class="support-ticket"><b>Заявка #' + escapeHtml(item.id) + ' · ' + escapeHtml(roleLabels[item.requested_role] || item.requested_role) + '</b>' +
         '<small>' + escapeHtml(applicationStatus[item.status] || item.status) + ' · ' + new Date(item.created_at).toLocaleString('ru-RU') + '</small>' +
-        (item.review_note ? '<p>' + escapeHtml(item.review_note) + '</p>' : '') + '</article>'
+        (item.review_note ? '<p>' + escapeHtml(item.review_note) + '</p>' : '') + (item.interview_at ? '<p>Собеседование: ' + new Date(item.interview_at).toLocaleString('ru-RU') + (item.interview_score ? ' · оценка ' + item.interview_score + '/5' : '') + '</p>' : '') + (item.interview_feedback ? '<p>Комментарий: ' + escapeHtml(item.interview_feedback) + '</p>' : '') + '</article>'
       ).join('') : '<p class="support-empty">Вы ещё не отправляли заявки.</p>';
     } catch (error) { applicationHistory.innerHTML = '<p class="support-empty">' + escapeHtml(error.message) + '</p>'; }
   };
