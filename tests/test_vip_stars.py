@@ -1,0 +1,65 @@
+"""Tests for one-time VIP Stars shop configuration and presentation."""
+
+import os
+import unittest
+from unittest.mock import patch
+
+from vip_stars import (
+    TIERS,
+    build_shop_text,
+    tier_price,
+    vip_shop_keyboard,
+)
+
+
+class VipStarsConfigurationTests(unittest.TestCase):
+    def test_unconfigured_prices_disable_checkout_buttons(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(tier_price("silver"))
+            self.assertEqual(vip_shop_keyboard().inline_keyboard, [])
+
+    def test_valid_configured_prices_are_read_from_environment(self):
+        values = {
+            "VIP_SILVER_PRICE_STARS": "100",
+            "VIP_GOLD_PRICE_STARS": "250",
+            "VIP_DIAMOND_PRICE_STARS": "500",
+        }
+        with patch.dict(os.environ, values, clear=True):
+            self.assertEqual(tier_price("silver"), 100)
+            self.assertEqual(tier_price("gold"), 250)
+            self.assertEqual(tier_price("diamond"), 500)
+            buttons = [
+                button
+                for row in vip_shop_keyboard().inline_keyboard
+                for button in row
+            ]
+            self.assertEqual(len(buttons), 3)
+            self.assertEqual(
+                {button.callback_data for button in buttons},
+                {"vip:buy:silver", "vip:buy:gold", "vip:buy:diamond"},
+            )
+
+    def test_invalid_prices_are_rejected(self):
+        for raw in ("0", "-5", "10001", "not-a-number"):
+            with self.subTest(raw=raw):
+                with patch.dict(os.environ, {"VIP_SILVER_PRICE_STARS": raw}, clear=True):
+                    self.assertIsNone(tier_price("silver"))
+
+    def test_unknown_tier_has_no_price(self):
+        self.assertIsNone(tier_price("platinum"))
+
+    def test_shop_explains_one_time_term_and_no_autorenewal(self):
+        with patch.dict(os.environ, {}, clear=True):
+            text = build_shop_text()
+        self.assertIn("30 дней", text)
+        self.assertIn("Автопродления нет", text)
+        self.assertIn("не настроил цены", text)
+
+    def test_tiers_have_distinct_progressive_perks(self):
+        self.assertEqual(set(TIERS), {"silver", "gold", "diamond"})
+        self.assertTrue(any("/vipname" in perk for perk in TIERS["gold"]["perks"]))
+        self.assertTrue(any("/viptitle" in perk for perk in TIERS["diamond"]["perks"]))
+
+
+if __name__ == "__main__":
+    unittest.main()
