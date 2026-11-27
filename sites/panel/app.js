@@ -35,16 +35,31 @@ function renderPeople(data){
     return '<tr><td>'+esc(x.display_name||x.username||x.user_id)+(x.username?' <span class="muted-cell">@'+esc(x.username)+'</span>':'')+'<div class="muted-cell">ID '+esc(x.user_id)+' · '+esc(x.chat_title||"")+'</div></td><td>'+esc(x.message_count)+' сообщений<div class="muted-cell">С нами с '+esc(date(x.first_seen_at))+'</div></td><td>'+esc(x.warning_count)+'</td><td>'+esc(x.role_title||"Участник")+' <span class="muted-cell">приоритет '+esc(x.priority)+'</span></td><td><div class="role-actions">'+historyButton+selector+actions+'</div></td></tr>';
   })); 
 }
-async function loadMemberHistory(chatId,userId){
+async function loadMemberHistory(chatId,userId,filters={}){
   const node=$("member-history");
   node.hidden=false;
   node.innerHTML='<p class="empty"><span class="spinner"></span> Загружаем историю участника…</p>';
   node.scrollIntoView({behavior:"smooth",block:"nearest"});
+  const params=new URLSearchParams();
+  if(filters.category)params.set("category",filters.category);
+  if(filters.actor_id)params.set("actor_id",filters.actor_id);
   try{
-    const data=await request("/api/members/"+encodeURIComponent(chatId)+"/"+encodeURIComponent(userId)+"/history");
+    const suffix=params.toString()?"?"+params.toString():"";
+    const data=await request("/api/members/"+encodeURIComponent(chatId)+"/"+encodeURIComponent(userId)+"/history"+suffix);
     const m=data.member;
-    node.innerHTML='<div class="member-history-head"><div><b>'+esc(m.display_name||m.username||m.user_id)+'</b><small>'+esc(m.chat_title||m.chat_id)+' · ID '+esc(m.user_id)+(m.username?' · @'+esc(m.username):'')+'</small></div><button class="button button-quiet" id="close-member-history" type="button">Скрыть</button></div><div class="member-history-stats"><span>Сообщения <b>'+esc(m.message_count)+'</b></span><span>Предупреждения <b>'+esc(m.warning_count)+'</b></span><span>Роль <b>'+esc(m.role_title)+' · '+esc(m.priority)+'</b></span><span>В группе с <b>'+esc(date(m.first_seen_at))+'</b></span></div>'+table(["Действие","Модератор","Детали","Дата"],data.events.map(e=>'<tr><td>'+esc(e.action)+'</td><td>'+esc(e.actor_id??"Автоматически")+'</td><td>'+esc(e.details||"—")+'</td><td>'+esc(date(e.created_at))+'</td></tr>'))+(data.events.length?'':'<p class="empty">Записей о действиях над участником пока нет.</p>');
+    node.innerHTML='<div class="member-history-head"><div><b>'+esc(m.display_name||m.username||m.user_id)+'</b><small>'+esc(m.chat_title||m.chat_id)+' · ID '+esc(m.user_id)+(m.username?' · @'+esc(m.username):'')+'</small></div><button class="button button-quiet" id="close-member-history" type="button">Скрыть</button></div><div class="member-history-stats"><span>Сообщения <b>'+esc(m.message_count)+'</b></span><span>Предупреждения <b>'+esc(m.warning_count)+'</b></span><span>Роль <b>'+esc(m.role_title)+' · '+esc(m.priority)+'</b></span><span>В группе с <b>'+esc(date(m.first_seen_at))+'</b></span></div><div class="member-history-filters"><label>Тип события<select id="member-history-category"><option value="">Все события</option><option value="moderation">Модерация</option><option value="roles">Изменения ролей</option></select></label><label>Модератор (Telegram ID)<input id="member-history-actor" type="number" min="1" inputmode="numeric" placeholder="Любой модератор"></label><button class="button button-secondary" id="member-history-apply" type="button">Применить</button></div>'+table(["Тип","Действие","Модератор","Детали","Дата"],data.events.map(e=>'<tr><td>'+esc(e.category==="roles"?"Роли":"Модерация")+'</td><td>'+esc(e.action)+'</td><td>'+esc(e.actor_id??"Автоматически")+'</td><td>'+esc(e.details||"—")+'</td><td>'+esc(date(e.created_at))+'</td></tr>'))+(data.events.length?'':'<p class="empty">По выбранным фильтрам записей нет.</p>');
+    $("member-history-category").value=filters.category||"";
+    $("member-history-actor").value=filters.actor_id||"";
     $("close-member-history").addEventListener("click",()=>{node.hidden=true;node.innerHTML="";});
+    $("member-history-apply").addEventListener("click",()=>{
+      loadMemberHistory(chatId,userId,{
+        category:$("member-history-category").value,
+        actor_id:$("member-history-actor").value.trim()
+      });
+    });
+    $("member-history-actor").addEventListener("keydown",event=>{
+      if(event.key==="Enter")$("member-history-apply").click();
+    });
   }catch(error){node.innerHTML='<p class="notice">'+esc(error.message)+'</p>';}
 }
 async function loadPeople(){
