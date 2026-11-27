@@ -119,6 +119,23 @@ class Database:
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (chat_id, user_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS system_staff (
+                    user_id BIGINT PRIMARY KEY,
+                    role_key TEXT NOT NULL,
+                    assigned_by BIGINT NOT NULL,
+                    assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS system_staff_role_idx ON system_staff (role_key);
+                CREATE TABLE IF NOT EXISTS system_staff_log (
+                    id BIGSERIAL PRIMARY KEY,
+                    actor_id BIGINT NOT NULL,
+                    target_id BIGINT NOT NULL,
+                    action TEXT NOT NULL,
+                    details TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS system_staff_log_created_idx
+                    ON system_staff_log (created_at DESC);
             """)
 
     async def close(self) -> None:
@@ -312,5 +329,48 @@ class Database:
         pool = self._require_pool()
         return bool(await pool.fetchval(
             "SELECT EXISTS(SELECT 1 FROM chat_moderators WHERE chat_id = $1 AND user_id = $2)", chat_id, user_id))
+
+
+    async def get_system_role(self, user_id: int) -> str | None:
+        pool = self._require_pool()
+        return await pool.fetchval("SELECT role_key FROM system_staff WHERE user_id = $1", user_id)
+
+    async def set_system_role(self, user_id: int, role_key: str, actor_id: int) -> None:
+        pool = self._require_pool()
+        await pool.execute(
+            """INSERT INTO system_staff (user_id, role_key, assigned_by)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (user_id) DO UPDATE SET role_key = EXCLUDED.role_key,
+               assigned_by = EXCLUDED.assigned_by, assigned_at = NOW()""",
+            user_id, role_key, actor_id,
+        )
+
+    async def remove_system_role(self, user_id: int) -> bool:
+        pool = self._require_pool()
+        result = await pool.execute("DELETE FROM system_staff WHERE user_id = $1", user_id)
+        return result.endswith(" 1")
+
+    async def list_system_staff(self) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        return await pool.fetch(
+            "SELECT user_id, role_key, assigned_by, assigned_at FROM system_staff ORDER BY assigned_at"
+        )
+
+    async def add_system_staff_log(self, actor_id: int, target_id: int, action: str, details: str = "") -> None:
+        pool = self._require_pool()
+        await pool.execute(
+            """INSERT INTO system_staff_log (actor_id, target_id, action, details)
+               VALUES ($1, $2, $3, $4)""",
+            actor_id, target_id, action[:40], details[:160],
+        )
+
+    async def get_system_staff_log(self, limit: int = 15) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        safe_limit = max(1, min(int(limit), 50))
+        return await pool.fetch(
+            """SELECT actor_id, target_id, action, details, created_at
+               FROM system_staff_log ORDER BY created_at DESC, id DESC LIMIT $1""",
+            safe_limit,
+        )
 
 database = Database()
