@@ -583,6 +583,27 @@ class Database:
                        ON CONFLICT (chat_id, user_id) DO NOTHING"""
                 )
 
+    async def list_chat_member_roles(self, chat_id: int):
+        pool = self._require_pool()
+        return await pool.fetch(
+            """SELECT m.user_id, r.role_key, r.title, r.priority, m.assigned_by, m.assigned_at
+               FROM chat_member_roles m
+               JOIN chat_role_definitions r
+                 ON r.chat_id = m.chat_id AND r.role_key = m.role_key
+               WHERE m.chat_id = $1
+               UNION ALL
+               SELECT legacy.user_id, 'moderator', 'Модератор', 40,
+                      legacy.assigned_by, legacy.created_at
+               FROM chat_moderators legacy
+               WHERE legacy.chat_id = $1
+                 AND NOT EXISTS (
+                   SELECT 1 FROM chat_member_roles current
+                   WHERE current.chat_id = legacy.chat_id AND current.user_id = legacy.user_id
+                 )
+               ORDER BY priority DESC, user_id""",
+            chat_id,
+        )
+
     async def get_chat_role_definitions(self, chat_id: int):
         pool = self._require_pool()
         return await pool.fetch(
