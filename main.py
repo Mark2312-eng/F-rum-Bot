@@ -236,9 +236,12 @@ def _panel_origin(request: web.Request) -> str:
 
 def _panel_cors(request: web.Request, response: web.StreamResponse) -> web.StreamResponse:
     origin = request.headers.get("Origin", "")
-    allowed = _panel_origin(request)
-    if allowed and origin == allowed:
-        response.headers["Access-Control-Allow-Origin"] = allowed
+    allowed_origins = {
+        _panel_origin(request),
+        os.getenv("PUBLIC_SITE_ORIGIN", "https://f-rum-bot-info.onrender.com").strip().rstrip("/"),
+    }
+    if origin and origin.rstrip("/") in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin.rstrip("/")
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Vary"] = "Origin"
     return response
@@ -508,9 +511,10 @@ async def panel_close_report(request: web.Request) -> web.Response:
     return _panel_cors(request, web.json_response({"ok": True, "report_id": report_id}))
 
 
-async def start_web_server(port: int) -> web.AppRunner:
+async def start_web_server(port: int, bot: Bot) -> web.AppRunner:
     """Start health-check and authenticated admin-panel API endpoints."""
     app = web.Application(middlewares=[panel_cors_middleware])
+    app["bot"] = bot
     app.router.add_get("/", health_check)
     app.router.add_get("/health", health_check)
     app.router.add_route("OPTIONS", "/api/{tail:.*}", panel_options)
@@ -1403,7 +1407,7 @@ async def main() -> None:
         await database.connect()
         await ensure_support_schema()
         LOGGER.info("PostgreSQL connection established; support schema ready")
-        runner = await start_web_server(port)
+        runner = await start_web_server(port, bot)
         await bot.delete_webhook(drop_pending_updates=True)
         await bot.set_my_commands([
             BotCommand(command="start", description="Открыть главное меню"),
