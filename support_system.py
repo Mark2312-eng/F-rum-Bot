@@ -931,12 +931,20 @@ async def staff_application_assign_role(request: web.Request) -> web.Response:
             )
             if existing_role:
                 return _cors(request, web.json_response({"error": "У пользователя уже есть системная должность. Измените её через управление командой."}, status=409))
-            role_ranks = {key: value["rank"] for key, value in ROLES.items()}
-            assigned = await database.assign_system_role_guarded(
-                row["user_id"], role_key, actor_id, owner_id, role_ranks
+            if row["user_id"] == owner_id or ROLES[role_key]["rank"] >= 100:
+                return _cors(request, web.json_response({"error": "Недопустимый уровень системной должности."}, status=409))
+            assigned = await conn.execute(
+                """INSERT INTO system_staff(user_id,role_key,assigned_by)
+                   VALUES($1,$2,$3) ON CONFLICT(user_id) DO NOTHING""",
+                row["user_id"], role_key, actor_id,
             )
-            if not assigned:
-                return _cors(request, web.json_response({"error": "Не удалось назначить должность: проверьте иерархию ролей."}, status=409))
+            if not assigned.endswith(" 1"):
+                return _cors(request, web.json_response({"error": "Системная должность уже назначена. Проверьте раздел команды."}, status=409))
+            await conn.execute(
+                """INSERT INTO system_staff_log(actor_id,target_id,action,details)
+                   VALUES($1,$2,'set_role',$3)""",
+                actor_id, row["user_id"], role_key,
+            )
             await conn.execute(
                 """INSERT INTO staff_application_events(application_id,actor_id,action,details)
                    VALUES($1,$2,'role_assigned',$3)""",
