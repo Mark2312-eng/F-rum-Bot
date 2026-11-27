@@ -19,6 +19,7 @@ from moderation import ban_member, clear_warnings, kick_member, moderate_message
 from group_settings import apply_setting_callback, show_group_settings
 from advanced_moderation import blacklist_command, nickname_command, report_command, reportclose_command, reports_command, role_command
 from system_roles import staff_command, myrole_command, staffinfo_command, setrole_command, staffremove_command, stafflog_command, rolehelp_command, syshealth_command, reporthelp_command
+from testing import create_test_command, add_question_command, send_test_command, test_results_command, handle_test_start, test_answer_callback
 
 load_dotenv()
 
@@ -351,6 +352,8 @@ async def send_forum_stats(message: Message) -> None:
 
 
 async def cmd_start(message: Message) -> None:
+    if await handle_test_start(message):
+        return
     try:
         forum_url = get_forum_url()
     except ValueError:
@@ -404,6 +407,10 @@ async def cmd_help(message: Message) -> None:
         "/rolehelp — справка по должностям\n"
         "/syshealth — техническая диагностика (тех. роли)\n"
         "/reporthelp — регламент поддержки\n"
+        "/createtest — создать тест (сотрудники 80+)\n"
+        "/testadd — добавить вопрос\n"
+        "/sendtest ID ТЕСТА — выдать тест\n"
+        "/testresults ID — результаты теста\n"
         "/connect — подключить группу (владелец бота).\n\n"
         "Команды модерации доступны владельцу и администраторам подключённой группы. "
         "Боту нужны права администратора.",
@@ -775,6 +782,26 @@ async def system_reporthelp_handler(message: Message) -> None:
     await reporthelp_command(message, owner_id)
 
 
+async def test_create_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await create_test_command(message, owner_id)
+
+
+async def test_add_question_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await add_question_command(message, owner_id)
+
+
+async def test_send_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await send_test_command(message, owner_id)
+
+
+async def test_results_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await test_results_command(message, owner_id)
+
+
 def create_dispatcher() -> Dispatcher:
     """Configure the moderation-first Telegram dispatcher."""
     dispatcher = Dispatcher()
@@ -814,6 +841,11 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(system_rolehelp_handler, Command("rolehelp"))
     dispatcher.message.register(system_syshealth_handler, Command("syshealth"))
     dispatcher.message.register(system_reporthelp_handler, Command("reporthelp"))
+    dispatcher.message.register(test_create_handler, Command("createtest"))
+    dispatcher.message.register(test_add_question_handler, Command("testadd"))
+    dispatcher.message.register(test_send_handler, Command("sendtest"))
+    dispatcher.message.register(test_results_handler, Command("testresults"))
+    dispatcher.callback_query.register(test_answer_callback, F.data.startswith("testq:"))
     dispatcher.message.register(button_input_handler, lambda message: bool(message.from_user and message.from_user.id in PENDING_INPUTS))
     dispatcher.message.register(group_moderation_handler)
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
@@ -870,6 +902,10 @@ async def main() -> None:
             BotCommand(command="rolehelp", description="Справка по должностям"),
             BotCommand(command="syshealth", description="Техническая диагностика"),
             BotCommand(command="reporthelp", description="Регламент поддержки"),
+            BotCommand(command="createtest", description="Создать тест (системная команда 80+)"),
+            BotCommand(command="testadd", description="Добавить вопрос в тест"),
+            BotCommand(command="sendtest", description="Выдать тест пользователю"),
+            BotCommand(command="testresults", description="Результаты теста"),
             BotCommand(command="warn", description="Выдать предупреждение"),
             BotCommand(command="warns", description="Проверить предупреждения"),
             BotCommand(command="clearwarns", description="Сбросить предупреждения"),
