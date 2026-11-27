@@ -270,6 +270,140 @@ async def unmute_member(message: Message, bot: Bot, owner_id: int) -> None:
         await message.reply("Не удалось снять ограничение. Проверь права бота.")
 
 
+async def _moderation_command_allowed(message: Message, bot: Bot, owner_id: int) -> bool:
+    if not is_group(message):
+        await message.reply("Эта команда работает только в группе.")
+        return False
+    if not await database.is_chat_registered(message.chat.id):
+        await message.reply("Сначала подключите группу командой /connect от имени владельца.")
+        return False
+    if not await is_moderator(message, bot, owner_id):
+        await message.reply("⛔ Команда доступна только владельцу и администраторам группы.")
+        return False
+    return True
+
+
+async def ban_member(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    target = await _get_moderation_target(message, bot)
+    if target is None or target.is_bot or target.id == owner_id:
+        await message.reply("Ответьте на сообщение участника или укажите ID: /ban 123456.")
+        return
+    if await is_chat_admin(bot, message.chat.id, target.id):
+        await message.reply("Нельзя заблокировать администратора группы.")
+        return
+    try:
+        await bot.ban_chat_member(message.chat.id, target.id)
+        await database.log_moderation_event(message.chat.id, message.from_user.id, target.id, "ban")
+        await message.answer(f"⛔ {target.mention_html()} заблокирован в группе.", parse_mode="HTML")
+    except Exception:
+        await message.reply("Не удалось заблокировать участника. Проверьте права бота.")
+
+
+async def unban_member(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    target = await _get_moderation_target(message, bot)
+    if target is None:
+        await message.reply("Укажите Telegram ID пользователя: /unban 123456.")
+        return
+    try:
+        await bot.unban_chat_member(message.chat.id, target.id, only_if_banned=True)
+        await database.log_moderation_event(message.chat.id, message.from_user.id, target.id, "unban")
+        await message.answer(f"✅ Блокировка снята с пользователя <code>{target.id}</code>.", parse_mode="HTML")
+    except Exception:
+        await message.reply("Не удалось снять блокировку. Проверьте ID и права бота.")
+
+
+async def kick_member(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    target = await _get_moderation_target(message, bot)
+    if target is None or target.is_bot or target.id == owner_id:
+        await message.reply("Ответьте на сообщение участника или укажите ID: /kick 123456.")
+        return
+    if await is_chat_admin(bot, message.chat.id, target.id):
+        await message.reply("Нельзя исключить администратора группы.")
+        return
+    try:
+        await bot.ban_chat_member(message.chat.id, target.id, revoke_messages=False)
+        await bot.unban_chat_member(message.chat.id, target.id, only_if_banned=True)
+        await database.log_moderation_event(message.chat.id, message.from_user.id, target.id, "kick")
+        await message.answer(f"👢 {target.mention_html()} исключён из группы. Он сможет вступить снова по ссылке.", parse_mode="HTML")
+    except Exception:
+        await message.reply("Не удалось исключить участника. Проверьте права бота.")
+
+
+async def purge_messages(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    args = (message.text or "").split(maxsplit=1)
+    try:
+        count = int(args[1]) if len(args) > 1 else 10
+    except ValueError:
+        count = 0
+    if not 1 <= count <= 100:
+        await message.reply("Укажите количество от 1 до 100: /purge 20.")
+        return
+    first_id = max(1, message.message_id - count)
+    message_ids = list(range(first_id, message.message_id + 1))
+    try:
+        deleted = await bot.delete_messages(message.chat.id, message_ids)
+        await database.log_moderation_event(
+            message.chat.id, message.from_user.id, None, "purge", f"диапазон до {message.message_id}, запрос {count}"
+        )
+        # Telegram's bulk delete endpoint does not return the exact deleted count.
+        await message.answer(f"🧹 Запрос на очистку {count} последних сообщений выполнен.")
+    except Exception:
+        await message.reply("Не удалось очистить сообщения. Проверьте права бота и возраст сообщений.")
+
+
+async def show_warnings(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    target = await _get_moderation_target(message, bot)
+    if target is None:
+        await message.reply("Ответьте на сообщение участника или укажите ID: /warns 123456.")
+        return
+    count = await database.get_warning_count(message.chat.id, target.id)
+    await message.answer(
+        f"⚠️ У пользователя <code>{target.id}</code> предупреждений: <b>{count}/{WARNING_LIMIT}</b>.",
+        parse_mode="HTML",
+    )
+
+
+async def clear_warnings(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    target = await _get_moderation_target(message, bot)
+    if target is None:
+        await message.reply("Ответьте на сообщение участника или укажите ID: /clearwarns 123456.")
+        return
+    await database.reset_warnings(message.chat.id, target.id)
+    await database.log_moderation_event(message.chat.id, message.from_user.id, target.id, "warnings_reset")
+    await message.answer(f"✅ Предупреждения пользователя <code>{target.id}</code> сброшены.", parse_mode="HTML")
+
+
+async def show_moderation_stats(message: Message, bot: Bot, owner_id: int) -> None:
+    if not await _moderation_command_allowed(message, bot, owner_id):
+        return
+    stats = await database.get_moderation_stats(message.chat.id)
+    labels = {
+        "warning": "Предупреждения", "auto_mute": "Автомуты", "manual_mute": "Муты",
+        "unmute": "Снятие мута", "ban": "Блокировки", "unban": "Разблокировки",
+        "kick": "Исключения", "purge": "Очистки", "link_deleted": "Удалённые ссылки",
+        "link_mute": "Ограничения за ссылки", "flood_delete": "Антифлуд",
+        "warnings_reset": "Сбросы предупреждений",
+    }
+    if not stats:
+        await message.answer("📊 За последние 7 дней действий модерации не было.")
+        return
+    lines = ["📊 <b>Статистика модерации за 7 дней</b>", ""]
+    lines.extend(f"• {labels.get(row['action'], row['action'])}: <b>{row['total']}</b>" for row in stats)
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
 MODERATION_ACTION_LABELS = {
     "link_deleted": "Удалена ссылка",
     "link_mute": "Ограничение за ссылку",
@@ -278,6 +412,11 @@ MODERATION_ACTION_LABELS = {
     "auto_mute": "Автоматическое ограничение",
     "manual_mute": "Ручное ограничение",
     "unmute": "Снято ограничение",
+    "ban": "Блокировка",
+    "unban": "Разблокировка",
+    "kick": "Исключение",
+    "purge": "Очистка сообщений",
+    "warnings_reset": "Сброс предупреждений",
 }
 
 
