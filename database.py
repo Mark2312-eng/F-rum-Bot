@@ -4,6 +4,29 @@ import os
 import asyncpg
 
 
+async def record_legacy_schema_baseline(connection: asyncpg.Connection) -> None:
+    """Record the existing inline schema as the initial migration baseline.
+
+    The legacy schema is applied before this marker. Future schema changes must
+    be added as ordered, separately reviewed migrations rather than silently
+    extending the startup bootstrap.
+    """
+    await connection.execute("""
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version TEXT PRIMARY KEY,
+            description TEXT NOT NULL,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    await connection.execute(
+        """INSERT INTO schema_migrations (version, description)
+           VALUES ($1, $2)
+           ON CONFLICT (version) DO NOTHING""",
+        "0001_legacy_schema_baseline",
+        "Baseline for the pre-existing F-rum-Bot PostgreSQL schema",
+    )
+
+
 class Database:
     def __init__(self) -> None:
         self.pool: asyncpg.Pool | None = None
@@ -288,6 +311,8 @@ class Database:
                 );
             """)
         await self.ensure_chat_roles()
+        async with self.pool.acquire() as connection:
+            await record_legacy_schema_baseline(connection)
 
     async def close(self) -> None:
         if self.pool is not None:
