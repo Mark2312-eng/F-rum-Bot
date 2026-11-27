@@ -156,27 +156,50 @@
             <p>${escapeHtml(message.body)}</p>
           </article>`).join('')}</div>
         ${data.ticket.status === 'closed' ? '<p class="support-closed-note">Обращение закрыто. Создайте новое, если нужна дополнительная помощь.</p>' : `
-          <form id="supportReplyForm" class="support-reply-form">
+          <form id="supportReplyForm" class="support-reply-form" data-ticket-id="${escapeHtml(data.ticket.id)}">
             <textarea name="message" maxlength="2000" rows="3" required placeholder="Напишите ответ…"></textarea>
             <button class="button button-primary" type="submit">Отправить ответ</button>
+            <p class="support-reply-feedback" role="status" aria-live="polite"></p>
           </form>`}
       `;
       document.getElementById('supportThreadClose')?.addEventListener('click', () => { supportThread.hidden = true; });
-      document.getElementById('supportReplyForm')?.addEventListener('submit', async event => {
-        event.preventDefault();
-        const form = event.currentTarget;
-        const message = new FormData(form).get('message').toString().trim();
-        if (!message) return;
-        const button = form.querySelector('button');
-        button.disabled = true;
-        try {
-          await supportRequest(`/tickets/${id}/messages`, { method: 'POST', body: JSON.stringify({ message }) });
-          await openSupportThread(id);
-          await loadSupportTickets();
-        } catch (error) { supportFeedback.textContent = error.message; button.disabled = false; }
-      });
     } catch (error) { supportFeedback.textContent = error.message; }
   };
+
+  // Delegate reply submission from the persistent thread container. The form itself
+  // is re-rendered whenever a ticket is opened, so a delegated listener is more reliable.
+  supportThread?.addEventListener('submit', async event => {
+    const form = event.target.closest('#supportReplyForm');
+    if (!form) return;
+    event.preventDefault();
+    const messageField = form.elements.message;
+    const message = String(messageField?.value || '').trim();
+    const feedback = form.querySelector('.support-reply-feedback');
+    const button = form.querySelector('button[type="submit"]');
+    const ticketId = form.dataset.ticketId;
+    if (!message) {
+      if (feedback) feedback.textContent = 'Введите текст ответа.';
+      messageField?.focus();
+      return;
+    }
+    if (!ticketId || !button) return;
+    button.disabled = true;
+    button.textContent = 'Отправляем…';
+    if (feedback) feedback.textContent = '';
+    try {
+      await supportRequest(`/tickets/${encodeURIComponent(ticketId)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ message })
+      });
+      if (feedback) feedback.textContent = 'Ответ отправлен.';
+      await openSupportThread(ticketId);
+      await loadSupportTickets();
+    } catch (error) {
+      if (feedback) feedback.textContent = error.message || 'Не удалось отправить ответ. Попробуйте ещё раз.';
+      button.disabled = false;
+      button.textContent = 'Отправить ответ';
+    }
+  });
 
   const showSupportWorkspace = async user => {
     supportAuth.hidden = true;
