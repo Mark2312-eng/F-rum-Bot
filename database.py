@@ -807,7 +807,7 @@ class Database:
         self, chat_id: int, command_name: str, min_priority: int, actor_id: int,
         actor_priority: int,
     ) -> bool:
-        if actor_priority < 80 or not 0 <= min_priority <= 100 or min_priority >= actor_priority:
+        if actor_priority < 80 or not 0 <= min_priority <= 100 or min_priority > actor_priority:
             return False
         pool = self._require_pool()
         await pool.execute(
