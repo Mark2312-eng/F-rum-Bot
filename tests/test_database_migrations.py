@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock
 
-from database import record_legacy_schema_baseline
+from database import apply_global_blacklist_audit_migration, record_legacy_schema_baseline
 
 
 class SchemaMigrationBaselineTests(unittest.IsolatedAsyncioTestCase):
@@ -16,6 +16,24 @@ class SchemaMigrationBaselineTests(unittest.IsolatedAsyncioTestCase):
         insert_call = connection.execute.await_args_list[1]
         self.assertIn("ON CONFLICT (version) DO NOTHING", insert_call.args[0])
         self.assertEqual(insert_call.args[1], "0001_legacy_schema_baseline")
+
+
+class GlobalBlacklistAuditMigrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_creates_audit_table_and_records_ordered_migration(self):
+        connection = AsyncMock()
+        transaction = AsyncMock()
+        connection.transaction.return_value = transaction
+        transaction.__aenter__.return_value = None
+        transaction.__aexit__.return_value = False
+
+        await apply_global_blacklist_audit_migration(connection)
+
+        sql = connection.execute.await_args_list[0].args[0]
+        self.assertIn("CREATE TABLE IF NOT EXISTS global_blacklist_audit", sql)
+        self.assertIn("CHECK (action IN ('add', 'update', 'remove'))", sql)
+        insert = connection.execute.await_args_list[1]
+        self.assertIn("ON CONFLICT (version) DO NOTHING", insert.args[0])
+        self.assertEqual(insert.args[1], "0002_global_blacklist_audit")
 
 
 if __name__ == "__main__":
