@@ -178,6 +178,11 @@ async def ensure_support_schema() -> None:
         );
         CREATE INDEX IF NOT EXISTS staff_application_events_app_idx
             ON staff_application_events(application_id, created_at DESC, id DESC);
+        ALTER TABLE staff_application_events
+            DROP CONSTRAINT IF EXISTS staff_application_events_action_check;
+        ALTER TABLE staff_application_events
+            ADD CONSTRAINT staff_application_events_action_check
+            CHECK (action IN ('submitted','approved','rejected','interview_scheduled','interview_completed'));
         CREATE TABLE IF NOT EXISTS staff_application_interviews (
             id BIGSERIAL PRIMARY KEY,
             application_id BIGINT NOT NULL REFERENCES staff_applications(id),
