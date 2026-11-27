@@ -20,6 +20,52 @@ class Database:
             ssl="require",
         )
         async with self.pool.acquire() as connection:
+            # Explicitly remove the legacy gameplay schema after the owner's approval.
+            # CASCADE removes only dependencies attached to these named gameplay tables.
+            await connection.execute("""
+                DROP TABLE IF EXISTS game_players,
+                    game_achievements,
+                    game_families,
+                    game_family_members,
+                    game_government_departments,
+                    game_government_employees,
+                    game_government_tasks,
+                    game_factions,
+                    game_faction_members,
+                    game_medical_centers,
+                    game_medical_employees,
+                    game_medical_missions,
+                    game_medical_completions,
+                    game_education_institutions,
+                    game_education_students,
+                    game_education_groups,
+                    game_education_courses,
+                    game_education_completions,
+                    game_service_profiles,
+                    game_service_missions,
+                    game_service_completions,
+                    game_inventory,
+                    game_properties,
+                    game_jobs,
+                    game_employment,
+                    game_transport_routes,
+                    game_transport_stops,
+                    game_transport_route_stops,
+                    game_transport_tickets,
+                    game_taxi_orders,
+                    game_taxi_ratings,
+                    game_transport_rides,
+                    game_shop_items,
+                    game_property_catalog,
+                    game_vehicle_catalog,
+                    game_vehicles,
+                    game_events,
+                    game_quest_progress,
+                    game_quest_catalog,
+                    game_city_event_signups,
+                    game_tournaments,
+                    game_tournament_families CASCADE;
+            """)
             await connection.execute("""
                 CREATE TABLE IF NOT EXISTS registered_chats (
                     chat_id BIGINT PRIMARY KEY,
@@ -156,6 +202,23 @@ class Database:
         )
 
 
+    async def get_warning_count(self, chat_id: int, user_id: int) -> int:
+        pool = self._require_pool()
+        value = await pool.fetchval(
+            "SELECT warning_count FROM moderation_warnings WHERE chat_id = $1 AND user_id = $2",
+            chat_id, user_id,
+        )
+        return int(value or 0)
+
+    async def get_moderation_stats(self, chat_id: int) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        return await pool.fetch(
+            """SELECT action, COUNT(*) AS total
+               FROM moderation_events
+               WHERE chat_id = $1 AND created_at >= NOW() - INTERVAL '7 days'
+               GROUP BY action ORDER BY total DESC, action ASC""",
+            chat_id,
+        )
 
 
 database = Database()
