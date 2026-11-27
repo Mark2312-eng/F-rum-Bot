@@ -257,7 +257,7 @@ def _telegram_login_valid(data: dict, bot_token: str) -> bool:
     check = {key: value for key, value in data.items() if key != "hash"}
     if not check or any(isinstance(value, (dict, list)) for value in check.values()):
         return False
-    data_check = "\\n".join(f"{key}={check[key]}" for key in sorted(check))
+    data_check = "\n".join(f"{key}={check[key]}" for key in sorted(check))
     secret_key = hashlib.sha256(bot_token.encode("utf-8")).digest()
     expected = hmac.new(secret_key, data_check.encode("utf-8"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, received_hash):
