@@ -25,6 +25,9 @@ async def _allowed(message: Message, bot: Bot, owner_id: int) -> bool:
 
 
 async def report_command(message: Message, bot: Bot) -> None:
+    if message.chat.type not in {"group", "supergroup"} or not await database.is_chat_registered(message.chat.id):
+        await message.reply("Жалобы доступны в подключённых группах.")
+        return
     if not message.reply_to_message or not message.reply_to_message.from_user:
         await message.reply("Ответьте на сообщение и укажите причину: /report причина.")
         return
