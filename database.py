@@ -79,6 +79,8 @@ class Database:
                     ADD COLUMN IF NOT EXISTS moderation_mode TEXT NOT NULL DEFAULT 'balanced';
                 ALTER TABLE registered_chats
                     ADD COLUMN IF NOT EXISTS link_policy TEXT NOT NULL DEFAULT 'block';
+                ALTER TABLE registered_chats
+                    ADD COLUMN IF NOT EXISTS group_rules TEXT NOT NULL DEFAULT '';
                 CREATE TABLE IF NOT EXISTS moderation_warnings (
                     chat_id BIGINT NOT NULL,
                     user_id BIGINT NOT NULL,
@@ -324,6 +326,21 @@ class Database:
         if row is None:
             raise ValueError("Chat is not registered")
         return {"moderation_mode": row["moderation_mode"], "link_policy": row["link_policy"]}
+
+    async def get_chat_rules(self, chat_id: int) -> str:
+        pool = self._require_pool()
+        value = await pool.fetchval(
+            "SELECT group_rules FROM registered_chats WHERE chat_id = $1",
+            chat_id,
+        )
+        return str(value or "")
+
+    async def set_chat_rules(self, chat_id: int, rules: str) -> None:
+        pool = self._require_pool()
+        await pool.execute(
+            "UPDATE registered_chats SET group_rules = $2 WHERE chat_id = $1",
+            chat_id, rules[:3500],
+        )
 
     async def update_chat_setting(self, chat_id: int, setting: str, value: str) -> None:
         allowed = {
