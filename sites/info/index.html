@@ -96,6 +96,32 @@
       <p class="commands-note">Список ознакомительный. Фактическая доступность команд зависит от версии бота, прав пользователя и настроек группы.</p>
     </section>
 
+    <section id="support" class="section support-section">
+      <div class="section-heading"><div><p class="eyebrow">ЦЕНТР ПОМОЩИ / 04</p><h2>Поддержка<br><span>в одном месте.</span></h2></div><p class="section-intro">Создайте обращение на сайте или в Telegram. История переписки и ответы команды синхронизируются.</p></div>
+      <div class="support-shell">
+        <div class="support-auth" id="supportAuth">
+          <div class="support-auth-copy"><span class="support-icon">✉</span><h3>Войдите через Telegram</h3><p>Авторизация нужна, чтобы привязать обращения к вашему аккаунту и показывать историю переписки только вам.</p></div>
+          <div id="telegramLoginWidget"></div>
+          <p class="support-hint">Для уведомлений в Telegram откройте <a href="https://t.me/ViseRussiaHelpForumBot" target="_blank" rel="noopener">бота</a> и нажмите Start.</p>
+        </div>
+        <div class="support-workspace" id="supportWorkspace" hidden>
+          <div class="support-toolbar"><div><span class="support-online-dot"></span><strong id="supportWelcome">Вы вошли</strong></div><button class="support-logout" id="supportLogout" type="button">Выйти</button></div>
+          <div class="support-columns">
+            <div class="support-create">
+              <h3>Новое обращение</h3>
+              <form id="supportCreateForm">
+                <label for="supportSubject">Тема</label><input id="supportSubject" name="subject" maxlength="120" required placeholder="Например, не работает команда">
+                <label for="supportMessage">Опишите проблему</label><textarea id="supportMessage" name="message" maxlength="2000" required rows="5" placeholder="Что произошло и что вы ожидали увидеть?"></textarea>
+                <button class="button button-primary" type="submit">Отправить обращение <span>↗</span></button>
+              </form>
+              <p class="support-feedback" id="supportFeedback" role="status"></p>
+            </div>
+            <div class="support-history"><div class="support-history-head"><h3>Мои обращения</h3><button id="supportRefresh" type="button">Обновить ↻</button></div><div id="supportTickets" class="support-ticket-list"><p class="support-empty">Загрузка обращений…</p></div><div id="supportThread" class="support-thread" hidden></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="closing-cta"><p class="eyebrow">VISE RUSSIA / COMMUNITY TOOLS</p><h2>Порядок начинается<br><span>с правильных инструментов.</span></h2><p>Откройте бота и изучите доступные команды.</p><a class="button button-primary" href="https://t.me/ViseRussiaHelpForumBot" target="_blank" rel="noopener">Открыть F-rum-Bot <span>↗</span></a></section>
   </main>
   <button class="back-to-top" id="backToTop" type="button" aria-label="Наверх">↑</button>
