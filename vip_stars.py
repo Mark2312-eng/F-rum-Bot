@@ -88,28 +88,35 @@ def vip_shop_keyboard() -> InlineKeyboardMarkup:
 
 
 def build_shop_text() -> str:
-    return (
-        "⭐ <b>VIP-магазин VISE RUSSIA</b>\\n"
-        "<i>Дополнительные возможности оформления профиля.</i>\\n\\n"
-        "Выберите тариф, чтобы посмотреть его привилегии.\\n\\n"
-        "🥈 <b>Silver</b> · 25 ⭐\\n"
-        "🥇 <b>Gold</b> · 50 ⭐\\n"
-        "💎 <b>Diamond</b> · 100 ⭐\\n\\n"
-        "⏳ Каждый тариф действует 30 дней. Без автопродления.\\n"
-        "VIP не даёт прав модерации или администрирования."
-    )
+    lines = [
+        "⭐ <b>VIP-магазин VISE RUSSIA</b>",
+        "<i>Дополнительные возможности оформления профиля.</i>",
+        "",
+        "Выберите тариф, чтобы посмотреть его привилегии.",
+        "",
+    ]
+    for tier, details in TIERS.items():
+        price = tier_price(tier)
+        price_text = f"{price} ⭐" if price is not None else "временно недоступен"
+        lines.append(f"{details['badge']} <b>{details['name']}</b> · {price_text}")
+    lines.extend([
+        "",
+        "⏳ Каждый тариф действует 30 дней. Без автопродления.",
+        "VIP не даёт прав модерации или администрирования.",
+    ])
+    return "\n".join(lines)
 
 
 def _detail_text(tier: str) -> str:
     details = TIERS[tier]
     price = tier_price(tier)
     price_text = f"{price} ⭐" if price is not None else "Пока недоступен"
-    perks = "\\n".join(f"• {escape(perk)}" for perk in details["perks"])
+    perks = "\n".join(f"• {escape(perk)}" for perk in details["perks"])
     return (
-        f"{details['badge']} <b>{escape(details['name'])}</b>\\n"
-        f"<b>Стоимость:</b> {price_text}\\n"
-        "<b>Срок:</b> 30 дней, единоразовая оплата\\n\\n"
-        "<b>Привилегии:</b>\\n" + perks + "\\n\\n"
+        f"{details['badge']} <b>{escape(details['name'])}</b>\n"
+        f"<b>Стоимость:</b> {price_text}\n"
+        "<b>Срок:</b> 30 дней, единоразовая оплата\n\n"
+        "<b>Привилегии:</b>\n" + perks + "\n\n"
         "Автопродления нет. VIP не повышает роль и не открывает команды модерации."
     )
 
@@ -128,25 +135,25 @@ def _detail_keyboard(tier: str) -> InlineKeyboardMarkup:
 
 def _compare_text() -> str:
     return (
-        "📊 <b>Сравнение VIP-уровней</b>\\n\\n"
-        "🥈 <b>Silver · 25 ⭐</b>\\n"
-        "• VIP-бейдж\\n• /vipprofile и /vipbadge\\n\\n"
-        "🥇 <b>Gold · 50 ⭐</b>\\n"
-        "• Всё из Silver\\n• Персональное имя: /vipname\\n\\n"
-        "💎 <b>Diamond · 100 ⭐</b>\\n"
-        "• Всё из Gold\\n• Персональный титул: /viptitle\\n\\n"
+        "📊 <b>Сравнение VIP-уровней</b>\n\n"
+        "🥈 <b>Silver · 25 ⭐</b>\n"
+        "• VIP-бейдж\n• /vipprofile и /vipbadge\n\n"
+        "🥇 <b>Gold · 50 ⭐</b>\n"
+        "• Всё из Silver\n• Персональное имя: /vipname\n\n"
+        "💎 <b>Diamond · 100 ⭐</b>\n"
+        "• Всё из Gold\n• Персональный титул: /viptitle\n\n"
         "Все тарифы действуют 30 дней без автопродления."
     )
 
 
 def _faq_text() -> str:
     return (
-        "❔ <b>Помощь по VIP</b>\\n\\n"
-        "• Оплата проходит через Telegram Stars.\\n"
-        "• Подписка действует 30 дней с момента оплаты.\\n"
-        "• Автопродления и регулярных списаний нет.\\n"
-        "• Продление оформляется вручную новой покупкой.\\n"
-        "• VIP не даёт административных или модераторских прав.\\n\\n"
+        "❔ <b>Помощь по VIP</b>\n\n"
+        "• Оплата проходит через Telegram Stars.\n"
+        "• Подписка действует 30 дней с момента оплаты.\n"
+        "• Автопродления и регулярных списаний нет.\n"
+        "• Продление оформляется вручную новой покупкой.\n"
+        "• VIP не даёт административных или модераторских прав.\n\n"
         "По вопросам платежа: /paysupport."
     )
 
@@ -162,14 +169,14 @@ def _navigation_keyboard(page: str) -> InlineKeyboardMarkup:
 async def _status_screen(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
     membership = await _active_membership(user_id)
     if membership is None:
-        body = "👤 <b>Мой VIP</b>\\n\\nАктивной подписки нет. Выберите тариф в магазине."
+        body = "👤 <b>Мой VIP</b>\n\nАктивной подписки нет. Выберите тариф в магазине."
     else:
         tier = str(membership["tier"])
         expiry = membership["expires_at"].astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
         body = (
-            f"👤 <b>Мой VIP</b>\\n\\n{TIERS[tier]['badge']} "
-            f"<b>{escape(TIERS[tier]['name'])}</b>\\n"
-            f"Действует до: <b>{expiry}</b>\\nАвтопродления нет."
+            f"👤 <b>Мой VIP</b>\n\n{TIERS[tier]['badge']} "
+            f"<b>{escape(TIERS[tier]['name'])}</b>\n"
+            f"Действует до: <b>{expiry}</b>\nАвтопродления нет."
         )
     return body, _navigation_keyboard("status")
 
@@ -420,9 +427,9 @@ async def vip_navigation_callback(callback: CallbackQuery) -> None:
         ])
         await _edit_vip_screen(
             callback,
-            f"🧾 <b>Подтверждение покупки</b>\\n\\n"
-            f"{TIERS[value]['badge']} <b>{TIERS[value]['name']}</b>\\n"
-            f"Стоимость: <b>{price} ⭐</b>\\nСрок: <b>30 дней</b>\\n"
+            f"🧾 <b>Подтверждение покупки</b>\n\n"
+            f"{TIERS[value]['badge']} <b>{TIERS[value]['name']}</b>\n"
+            f"Стоимость: <b>{price} ⭐</b>\nСрок: <b>30 дней</b>\n"
             "Автопродления нет. Нажмите «Подтвердить», чтобы запросить счёт.",
             keyboard,
         )
