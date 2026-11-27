@@ -401,6 +401,7 @@ class PanelRoleAuthorizationTests(unittest.IsolatedAsyncioTestCase):
         pool.fetch = AsyncMock(return_value=[event])
         request = MagicMock()
         request.match_info = {"chat_id": "-1001", "user_id": "42"}
+        request.query = {}
 
         with patch("main._panel_require_owner", new=AsyncMock(return_value=123)):
             with patch("main.database.is_chat_registered", new=AsyncMock(return_value=True)):
