@@ -201,6 +201,27 @@ async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
     )
 
 
+MUTE_DURATIONS = {
+    "5m": (300, "5 минут"),
+    "10m": (600, "10 минут"),
+    "30m": (1800, "30 минут"),
+    "1h": (3600, "1 час"),
+    "12h": (43200, "12 часов"),
+    "1d": (86400, "1 день"),
+    "7d": (604800, "7 дней"),
+}
+
+
+def parse_mute_duration(message: Message) -> tuple[int, str] | None:
+    """Parse a safe, bounded mute duration from a command or reply."""
+    args = (message.text or "").split()
+    if message.reply_to_message:
+        duration = args[1].lower() if len(args) > 1 else "10m"
+    else:
+        duration = args[2].lower() if len(args) > 2 else "10m"
+    return MUTE_DURATIONS.get(duration)
+
+
 async def mute_member(message: Message, bot: Bot, owner_id: int) -> None:
     if not is_group(message):
         return
@@ -217,13 +238,11 @@ async def mute_member(message: Message, bot: Bot, owner_id: int) -> None:
     if await is_chat_admin(bot, message.chat.id, target.id):
         await message.reply("Нельзя ограничить администратора группы.")
         return
-    args = (message.text or "").split()
-    duration_text = args[2].lower() if len(args) > 2 and args[0].startswith("/") else (args[1].lower() if len(args) > 1 and not args[0].startswith("/") else "10m")
-    duration_seconds = {"5m": 300, "10m": 600, "30m": 1800, "1h": 3600, "12h": 43200, "1d": 86400, "7d": 604800}.get(duration_text)
-    if duration_seconds is None:
+    parsed_duration = parse_mute_duration(message)
+    if parsed_duration is None:
         await message.reply("Срок: 5m, 10m, 30m, 1h, 12h, 1d или 7d. Пример: /mute 123456 30m.")
         return
-    duration_label = {"5m": "5 минут", "10m": "10 минут", "30m": "30 минут", "1h": "1 час", "12h": "12 часов", "1d": "1 день", "7d": "7 дней"}[duration_text]
+    duration_seconds, duration_label = parsed_duration
     try:
         await bot.restrict_chat_member(
             message.chat.id,
