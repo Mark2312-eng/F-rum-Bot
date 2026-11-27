@@ -13,6 +13,8 @@ from moderation import (
 )
 
 from main import (
+    acquire_telegram_polling_lock,
+    POLLING_ADVISORY_LOCK_ID,
     build_main_keyboard,
     build_section_keyboard,
     build_player_message,
@@ -311,6 +313,28 @@ class XenForoApiTests(unittest.IsolatedAsyncioTestCase):
             await find_forum_user(
                 session, "https://forum.example/", "private", "key"
             )
+
+
+class PollingLockTests(unittest.IsolatedAsyncioTestCase):
+    async def test_lock_uses_dedicated_postgres_connection(self):
+        import os
+        from unittest.mock import patch
+
+        connection = MagicMock()
+        connection.fetchval = AsyncMock(return_value=True)
+        connection.close = AsyncMock()
+        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://example/test"}), \
+             patch("main.asyncpg.connect", new_callable=AsyncMock, return_value=connection) as connect:
+            acquired = await acquire_telegram_polling_lock()
+
+        self.assertIs(acquired, connection)
+        connect.assert_awaited_once_with(
+            dsn="postgresql://example/test", ssl="require", timeout=10, command_timeout=10
+        )
+        connection.fetchval.assert_awaited_once_with(
+            "SELECT pg_try_advisory_lock($1)", POLLING_ADVISORY_LOCK_ID
+        )
+        connection.close.assert_not_awaited()
 
 
 if __name__ == "__main__":
