@@ -55,7 +55,10 @@ def _valid_telegram_login(data: dict) -> bool:
     if any(isinstance(value, (dict, list)) for key, value in data.items() if key != "hash"):
         return False
     check = {key: value for key, value in data.items() if key != "hash"}
-    payload = "\n".join(f"{key}={check[key]}" for key in sorted(check))
+    payload = "\n".join(
+        f"{key}={str(check[key]).lower() if isinstance(check[key], bool) else check[key]}"
+        for key in sorted(check)
+    )
     key = hashlib.sha256(token.encode()).digest()
     expected = hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, received):
@@ -563,4 +566,4 @@ def register_support_bot(dispatcher) -> None:
     dispatcher.message.register(support_reply_command, Command("supportreply"))
     dispatcher.message.register(support_close_command, Command("supportclose"))
     dispatcher.callback_query.register(support_callback, F.data.startswith("support:"))
-    dispatcher.message.register(support_private_message, lambda message: bool(message.chat.type == "private" and message.from_user and message.text and message.from_user.id in WAITING_FOR_TICKET))
+    dispatcher.message.register(support_private_message, lambda message: bool(message.chat.type == "private" and message.from_user and message.text and (message.from_user.id in WAITING_FOR_TICKET or message.from_user.id in WAITING_FOR_REPLY)))
