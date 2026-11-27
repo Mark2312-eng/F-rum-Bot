@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from moderation import contains_link, format_moderation_log, owner_summary
+from moderation import contains_link, format_moderation_log, owner_summary, parse_mute_duration
 from group_settings import FLOOD_LABELS, LINK_LABELS, settings_keyboard, settings_text
 
 
@@ -42,6 +42,22 @@ class ModerationUnitTests(unittest.TestCase):
 
     def test_empty_moderation_log_has_placeholder(self):
         self.assertIn("Событий пока нет", format_moderation_log([]))
+
+    def test_mute_duration_defaults_to_ten_minutes(self):
+        message = SimpleNamespace(text="/mute 123456", reply_to_message=None)
+        self.assertEqual(parse_mute_duration(message), (600, "10 минут"))
+
+    def test_mute_duration_accepts_supported_periods(self):
+        message = SimpleNamespace(text="/mute 123456 30m", reply_to_message=None)
+        self.assertEqual(parse_mute_duration(message), (1800, "30 минут"))
+
+    def test_mute_duration_works_when_target_is_replied_to(self):
+        message = SimpleNamespace(text="/mute 30m", reply_to_message=object())
+        self.assertEqual(parse_mute_duration(message), (1800, "30 минут"))
+
+    def test_mute_duration_rejects_unbounded_or_invalid_values(self):
+        message = SimpleNamespace(text="/mute 123456 30d", reply_to_message=None)
+        self.assertIsNone(parse_mute_duration(message))
 
     def test_settings_labels_cover_supported_values(self):
         self.assertEqual(set(FLOOD_LABELS), {"off", "balanced", "strict"})

@@ -1,40 +1,24 @@
-"""Telegram bot for querying player information on a XenForo forum."""
+"""Telegram moderation bot for VISE RUSSIA XenForo community."""
 
 import asyncio
-import hashlib
-import hmac
-import json
 import logging
 import os
-import time
 from datetime import datetime, timezone
-from pathlib import Path
 from html import escape
-from urllib.parse import parse_qsl, urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
+from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiohttp import web
 from dotenv import load_dotenv
 
 from database import database
-from moderation import moderate_message, mute_member, owner_summary, register_group, show_moderation_log, unmute_member, warn_member
+from moderation import ban_member, clear_warnings, kick_member, moderate_message, mute_member, owner_summary, purge_messages, register_group, show_moderation_log, show_moderation_stats, show_warnings, unban_member, unmute_member, warn_member
 from group_settings import apply_setting_callback, show_group_settings
-from game import claim_daily_reward, handle_game_callback, show_achievements, show_game_profile, show_leaderboard
-from work import handle_work_callback, show_jobs, show_work
-from organizations import handle_org_callback, manage_family, manage_faction, show_factions
-from economy import handle_economy_callback, show_garage, show_inventory, show_properties, show_shop
-from city import handle_phone_callback, manage_city_event, show_city, show_events, show_phone, show_places
-from quests import handle_quest_callback, show_quests, show_reputation
-from tournaments import manage_tournament, show_tournaments
-from government import manage_government
-from service import manage_service
-from medical import manage_medical
-from education import manage_education
-from transport import manage_transport
-from taxi import manage_taxi
+from advanced_moderation import blacklist_command, nickname_command, report_command, reportclose_command, reports_command, role_command
+from system_roles import staff_command, myrole_command, staffinfo_command, setrole_command, staffremove_command, stafflog_command, rolehelp_command, syshealth_command, reporthelp_command
 
 load_dotenv()
 
@@ -158,38 +142,28 @@ def build_profile_message(
 
 
 def build_main_keyboard(forum_url: str, is_owner: bool = False) -> InlineKeyboardMarkup:
-    """Create the button-first main navigation keyboard."""
+    """Create a compact moderation-first navigation keyboard."""
     rows = [
-        [InlineKeyboardButton(text="🎮 Игра", callback_data="menu:game"), InlineKeyboardButton(text="💼 Работа", callback_data="menu:work")],
-        [InlineKeyboardButton(text="🏛 Организации", callback_data="menu:organizations"), InlineKeyboardButton(text="💰 Экономика", callback_data="menu:economy")],
-        [InlineKeyboardButton(text="🏙 Город", callback_data="menu:city"), InlineKeyboardButton(text="📋 Задания", callback_data="menu:quests")],
-        [InlineKeyboardButton(text="🏆 Турниры", callback_data="menu:tournaments"), InlineKeyboardButton(text="🏢 Службы города", callback_data="menu:services")],
-        [InlineKeyboardButton(text="👤 Профиль игрока", callback_data="menu:profile")],
+        [InlineKeyboardButton(text="👤 Профиль форума", callback_data="menu:profile")],
         [InlineKeyboardButton(text="🛡 Проверить наказание", callback_data="menu:punish")],
+        [InlineKeyboardButton(text="📊 Статистика форума", callback_data="menu:stats")],
     ]
     if is_owner:
         rows.append([InlineKeyboardButton(text="⚙️ Панель владельца", callback_data="owner_panel")])
-    webapp_url = os.getenv("WEBAPP_URL", "https://f-rum-bot.onrender.com").strip()
-    if webapp_url.startswith("https://"):
-        rows.append([InlineKeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=webapp_url))])
     rows.append([InlineKeyboardButton(text="🌐 Открыть форум", url=forum_url)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_section_keyboard(section: str) -> InlineKeyboardMarkup:
-    """Build a submenu from supported button-driven features."""
-    sections = {
-        "game": [("👤 Игровой профиль", "view:game"), ("🎁 Ежедневная награда", "view:daily"), ("🏆 Рейтинг игроков", "view:top"), ("🎖 Достижения", "view:achievements")],
-        "work": [("💼 Моя работа", "view:work"), ("📋 Список вакансий", "view:jobs")],
-        "organizations": [("🏛 Список фракций", "view:factions"), ("⚔️ Управление фракцией", "input:faction"), ("👨‍👩‍👧 Семья", "input:family")],
-        "economy": [("🛒 Магазин", "view:shop"), ("🎒 Инвентарь", "view:inventory"), ("🏠 Недвижимость", "view:property"), ("🚗 Гараж", "view:garage")],
-        "city": [("📱 Телефон", "view:phone"), ("🗺 Карта города", "view:city"), ("📍 Места и организации", "view:places"), ("📅 События", "view:events"), ("📝 Запись на событие", "input:event")],
-        "quests": [("📋 Задания", "view:quests"), ("⭐ Репутация", "view:reputation")],
-        "tournaments": [("🏆 Турниры", "view:tournaments"), ("📝 Управление турниром", "input:tournament")],
-        "services": [("🏛 Госслужба", "input:gov"), ("🚓 Служба", "input:service"), ("🏥 Медицина", "input:med"), ("🎓 Образование", "input:edu"), ("🚌 Транспорт", "input:bus"), ("🚕 Такси", "input:taxi")],
-    }
-    rows = [[InlineKeyboardButton(text=label, callback_data=data)] for label, data in sections.get(section, [])]
-    rows.append([InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")])
+def build_section_keyboard(section: str = "moderation") -> InlineKeyboardMarkup:
+    """Build the moderation navigation menu."""
+    rows = [
+        [InlineKeyboardButton(text="⚠️ Предупредить", callback_data="owner:warn")],
+        [InlineKeyboardButton(text="🔇 Выдать мут", callback_data="owner:mute")],
+        [InlineKeyboardButton(text="🔊 Снять мут", callback_data="owner:unmute")],
+        [InlineKeyboardButton(text="⚙️ Настройки группы", callback_data="owner:settings")],
+        [InlineKeyboardButton(text="📜 Журнал модерации", callback_data="owner:modlog")],
+        [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
+    ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -211,228 +185,11 @@ async def health_check(_request: web.Request) -> web.Response:
     return web.Response(text="Telegram Bot is running!")
 
 
-def validate_telegram_init_data(init_data: str, bot_token: str) -> dict | None:
-    """Validate Telegram Mini App initData using Telegram's HMAC procedure."""
-    if not init_data or len(init_data) > 8192 or not bot_token:
-        return None
-    try:
-        values = dict(parse_qsl(init_data, keep_blank_values=True, strict_parsing=True))
-        received_hash = values.pop("hash", "")
-        auth_date = int(values.get("auth_date", "0"))
-        if not received_hash or abs(int(time.time()) - auth_date) > 86400:
-            return None
-        check_string = "\n".join(f"{key}={value}" for key, value in sorted(values.items()))
-        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
-        expected_hash = hmac.new(secret_key, check_string.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected_hash, received_hash):
-            return None
-        user = json.loads(values.get("user", "{}"))
-        if not isinstance(user, dict) or not isinstance(user.get("id"), int):
-            return None
-        return user
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
-
-
-async def webapp_index(_request: web.Request) -> web.StreamResponse:
-    """Serve the Telegram Mini App frontend."""
-    page = Path(__file__).parent / "webapp" / "index.html"
-    if not page.is_file():
-        return web.Response(status=404, text="Mini App frontend not found")
-    return web.FileResponse(page)
-
-
-async def webapp_api(request: web.Request) -> web.Response:
-    """Authenticated Mini App API for game data and safe player actions."""
-    try:
-        payload = await request.json()
-    except (json.JSONDecodeError, ValueError):
-        return web.json_response({"error": "Некорректный запрос"}, status=400)
-    if not isinstance(payload, dict):
-        return web.json_response({"error": "Некорректный запрос"}, status=400)
-    user = validate_telegram_init_data(
-        str(payload.get("init_data", "")),
-        os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
-    )
-    if user is None:
-        return web.json_response({"error": "Не удалось подтвердить Telegram. Откройте приложение из бота."}, status=401)
-    user_id = user["id"]
-    username = str(user.get("username") or user.get("first_name") or "Игрок")[:64]
-    action = str(payload.get("action", "profile"))
-    def rows(data):
-        return [dict(item) for item in data]
-    try:
-        if action in {"profile", "me"}:
-            profile = await database.get_game_profile(user_id, username)
-            achievements = await database.sync_game_achievements(user_id)
-            return web.json_response({"user": {"id": user_id, "first_name": user.get("first_name", ""), "username": user.get("username", "")},
-                "profile": {"coins": profile["coins"], "xp": profile["xp"], "reputation": profile["reputation"], "daily_streak": profile["daily_streak"], "level": int(profile["xp"]) // 100 + 1},
-                "achievements": len(achievements)})
-        if action == "daily":
-            profile, reward, claimed = await database.claim_game_daily(user_id, username)
-            return web.json_response({"ok": claimed, "message": f"Получено: +{reward} монет и +50 XP." if claimed else "Ежедневная награда уже получена.", "profile": {"coins": profile["coins"], "xp": profile["xp"], "reputation": profile["reputation"], "daily_streak": profile["daily_streak"]}})
-        if action == "shop":
-            return web.json_response({"items": rows(await database.get_game_shop_items())})
-        if action == "inventory":
-            return web.json_response({"items": rows(await database.get_game_inventory(user_id))})
-        if action == "property":
-            owned = await database.get_game_property(user_id)
-            return web.json_response({"owned": ({"id": owned["id"], "property_type": owned["property_type"], "name": owned["name"]} if owned else None), "items": rows(await database.get_game_property_catalog())})
-        if action == "garage":
-            return web.json_response({"owned": [{"id": v["id"], "name": v["name"], "description": v["description"]} for v in await database.get_game_vehicles(user_id)], "items": rows(await database.get_game_vehicle_catalog())})
-        if action == "factions":
-            current = await database.get_game_faction(user_id)
-            return web.json_response({"items": rows(await database.get_game_factions()), "current": ({**dict(current), "joined_at": current["joined_at"].isoformat() if current["joined_at"] else None} if current else None)})
-        if action == "family":
-            family = await database.get_game_family(user_id)
-            members = await database.get_game_family_members(int(family["id"])) if family else []
-            member_rows = [{"user_id": m["user_id"], "username": m["username"], "role": m["role"], "joined_at": m["joined_at"].isoformat()} for m in members]
-            return web.json_response({"family": dict(family) if family else None, "members": member_rows})
-        if action == "family_catalog":
-            return web.json_response({"items": rows(await database.get_game_family_catalog())})
-        if action == "faction_roster":
-            faction, members = await database.get_game_faction_roster(user_id)
-            return web.json_response({
-                "faction": dict(faction) if faction else None,
-                "members": [{"user_id": m["user_id"], "username": m["username"], "rank_name": m["rank_name"]} for m in members],
-            })
-        if action == "jobs":
-            employment = await database.get_game_employment(user_id)
-            return web.json_response({"items": rows(await database.get_game_jobs()), "employment": ({"job_id": employment["job_id"], "job_name": employment["job_name"], "description": employment["description"], "reward_coins": employment["reward_coins"], "rank_name": employment["rank_name"], "shifts_completed": employment["shifts_completed"], "last_shift_at": employment["last_shift_at"].isoformat() if employment["last_shift_at"] else None} if employment else None)})
-        if action == "work_apply":
-            try:
-                job_id = int(payload.get("job_id", 0))
-            except (TypeError, ValueError):
-                job_id = 0
-            ok, message = await database.apply_game_job(user_id, username, job_id)
-            return web.json_response({"ok": ok, "message": message})
-        if action == "work_shift":
-            status, employment, reward = await database.perform_game_shift(user_id)
-            messages = {"ok": f"Смена завершена. Начислено {reward} монет и 35 XP.", "no_job": "Сначала устройся на работу.", "cooldown": "Следующую смену можно выполнить через 10 минут."}
-            return web.json_response({"ok": status == "ok", "status": status, "message": messages.get(status, "Не удалось выполнить смену.")})
-        if action == "work_quit":
-            ok = await database.quit_game_job(user_id)
-            return web.json_response({"ok": ok, "message": "Ты уволился с работы." if ok else "У тебя нет работы."})
-        if action == "leaderboard":
-            return web.json_response({"items": rows(await database.get_game_leaderboard(10))})
-        if action == "achievements":
-            achievements = await database.sync_game_achievements(user_id)
-            labels = {"first_steps": "Первые шаги", "experienced": "Опытный игрок", "wealthy": "Состоятельный житель", "reputation": "Уважаемый житель"}
-            return web.json_response({"items": [{"code": a["achievement_code"], "title": labels.get(a["achievement_code"], a["achievement_code"]), "unlocked_at": a["unlocked_at"].isoformat()} for a in achievements]})
-        if action == "quests":
-            quests = await database.get_game_quests(user_id)
-            return web.json_response({"items": [{"code": q["code"], "title": q["title"], "description": q["description"], "reward_coins": q["reward_coins"], "reward_xp": q["reward_xp"], "reward_reputation": q["reward_reputation"], "ready": q["ready"], "completed": q["completed_at"] is not None} for q in quests]})
-        if action == "claim_quest":
-            code = str(payload.get("code", ""))[:64]
-            status, coins, xp, reputation = await database.claim_game_quest(user_id, username, code)
-            messages = {"ok": f"Награда получена: +{coins} монет, +{xp} XP, +{reputation} репутации.", "not_ready": "Сначала выполни условие задания.", "claimed": "Это задание уже выполнено.", "missing": "Задание не найдено."}
-            return web.json_response({"ok": status == "ok", "status": status, "message": messages.get(status, "Не удалось получить награду.")})
-        if action == "reputation":
-            player = await database.get_game_reputation(user_id)
-            if player is None:
-                return web.json_response({"player": None})
-            score = int(player["reputation"])
-            title = "Легенда города" if score >= 50 else "Уважаемый житель" if score >= 25 else "Известный житель" if score >= 10 else "Активный житель" if score >= 3 else "Новичок"
-            return web.json_response({"player": {"username": player["username"], "xp": player["xp"], "coins": player["coins"], "reputation": score, "title": title}})
-        if action in {"events", "join_event", "leave_event"}:
-            events = [{"code": "fair", "title": "Городская ярмарка", "description": "Знакомство с городскими организациями и торговыми точками.", "starts_in_hours": 14}, {"code": "open_day", "title": "День открытых дверей", "description": "Презентации игровых фракций и профессий.", "starts_in_hours": 38}, {"code": "cleanup", "title": "Городской субботник", "description": "Совместное общественное мероприятие игроков.", "starts_in_hours": 62}]
-            if action == "join_event":
-                code = str(payload.get("code", ""))[:32]
-                status = await database.signup_city_event(user_id, username, code)
-                return web.json_response({"ok": status == "joined", "status": status, "message": {"joined": "Запись на событие подтверждена.", "already": "Ты уже записан на это событие.", "missing": "Неизвестное событие."}[status]})
-            if action == "leave_event":
-                code = str(payload.get("code", ""))[:32]
-                status = await database.leave_city_event(user_id, code)
-                return web.json_response({"ok": status == "left", "status": status, "message": {"left": "Запись отменена.", "not_joined": "Ты не записан на это событие.", "missing": "Неизвестное событие."}[status]})
-            signed = {r["event_code"] for r in await database.get_user_city_event_signups(user_id)}
-            return web.json_response({"items": [{**event, "joined": event["code"] in signed} for event in events]})
-        if action == "tournaments":
-            items = rows(await database.get_game_tournaments())
-            return web.json_response({"items": items})
-        if action == "join_tournament":
-            try:
-                tournament_id = int(payload.get("tournament_id", 0))
-            except (TypeError, ValueError):
-                tournament_id = 0
-            status = await database.join_game_tournament(user_id, tournament_id)
-            messages = {"joined": "Семья зарегистрирована на турнир.", "already": "Семья уже участвует.", "not_owner": "Записать семью может только её владелец.", "missing": "Турнир не найден.", "closed": "Регистрация закрыта."}
-            return web.json_response({"ok": status == "joined", "status": status, "message": messages.get(status, "Не удалось записаться.")})
-        if action == "transport":
-            routes = rows(await database.list_transport_routes())
-            return web.json_response({"routes": routes, "tickets": await database.get_transport_ticket_count(user_id), "history": [{"route": h["route_name"], "from": h["from_name"], "to": h["to_name"], "date": h["created_at"].isoformat()} for h in await database.get_transport_ride_history(user_id)]})
-        if action == "transport_stops":
-            try:
-                route_id = int(payload.get("route_id", 0))
-            except (TypeError, ValueError):
-                route_id = 0
-            stops = rows(await database.list_transport_stops(route_id))
-            return web.json_response({"items": stops})
-        if action == "buy_tickets":
-            try:
-                quantity = int(payload.get("quantity", 1))
-            except (TypeError, ValueError):
-                quantity = 0
-            ok, message = await database.buy_transport_tickets(user_id, username, quantity)
-            return web.json_response({"ok": ok, "message": message, "tickets": await database.get_transport_ticket_count(user_id)})
-        if action == "ride_transport":
-            try:
-                route_id = int(payload.get("route_id", 0))
-                from_stop = int(payload.get("from_stop_id", 0))
-                to_stop = int(payload.get("to_stop_id", 0))
-            except (TypeError, ValueError):
-                return web.json_response({"error": "Некорректные остановки."}, status=400)
-            ok, message = await database.ride_city_transport(user_id, route_id, from_stop, to_stop)
-            return web.json_response({"ok": ok, "message": message, "tickets": await database.get_transport_ticket_count(user_id)})
-        if action == "buy":
-            kind, code = str(payload.get("kind", "")), str(payload.get("code", ""))
-            if not code or len(code) > 64:
-                return web.json_response({"error": "Некорректный товар."}, status=400)
-            methods = {"item": database.buy_game_item, "property": database.buy_game_property, "vehicle": database.buy_game_vehicle}
-            if kind not in methods:
-                return web.json_response({"error": "Неизвестный тип покупки."}, status=400)
-            status, price = await methods[kind](user_id, username, code)
-            messages = {"ok": f"Покупка выполнена за {price} монет.", "funds": f"Недостаточно монет. Цена: {price}.", "owned": "У тебя уже есть недвижимость.", "limit": "Достигнут лимит транспорта.", "missing": "Товар больше недоступен."}
-            return web.json_response({"ok": status == "ok", "message": messages.get(status, "Покупка не выполнена."), "status": status})
-        if action == "join_faction":
-            try:
-                faction_id = int(payload.get("faction_id", 0))
-            except (TypeError, ValueError):
-                faction_id = 0
-            ok, message = await database.join_game_faction(user_id, username, faction_id)
-            return web.json_response({"ok": ok, "message": message})
-        if action == "leave_faction":
-            ok = await database.leave_game_faction(user_id)
-            return web.json_response({"ok": ok, "message": "Ты покинул фракцию." if ok else "Ты не состоишь во фракции."})
-        if action == "create_family":
-            name = str(payload.get("name", "")).strip()
-            if not 3 <= len(name) <= 32:
-                return web.json_response({"error": "Название семьи должно содержать от 3 до 32 символов."}, status=400)
-            ok, message = await database.create_game_family(user_id, username, name)
-            return web.json_response({"ok": ok, "message": message})
-        if action == "join_family":
-            try:
-                family_id = int(payload.get("family_id", 0))
-            except (TypeError, ValueError):
-                family_id = 0
-            if family_id <= 0:
-                return web.json_response({"error": "Укажи корректный ID семьи."}, status=400)
-            ok, message = await database.join_game_family(user_id, family_id)
-            return web.json_response({"ok": ok, "message": message})
-        if action == "leave_family":
-            ok, message = await database.leave_game_family(user_id)
-            return web.json_response({"ok": ok, "message": message})
-        return web.json_response({"error": "Неизвестное действие."}, status=400)
-    except Exception:
-        LOGGER.exception("Mini App API action failed: %s", action)
-        return web.json_response({"error": "Не удалось выполнить действие. Попробуйте позже."}, status=500)
-
-
 async def start_web_server(port: int) -> web.AppRunner:
-    """Start the health server and Telegram Mini App routes."""
-    app = web.Application(client_max_size=16 * 1024)
-    app.router.add_get("/", webapp_index)
+    """Start the lightweight health-check server."""
+    app = web.Application()
+    app.router.add_get("/", health_check)
     app.router.add_get("/health", health_check)
-    app.router.add_post("/api/webapp", webapp_api)
     runner = web.AppRunner(app, access_log=LOGGER)
     await runner.setup()
 
@@ -605,37 +362,110 @@ async def cmd_start(message: Message) -> None:
         "👋 <b>VISE RUSSIA | MOSCOW</b>\n\n"
         "Бот управления и модерации Telegram-групп.\n\n"
         "Добавьте бота в группу и выдайте права администратора.\n"
-        "Выберите нужный раздел с помощью кнопок ниже.",
+        "Профили форума, проверка наказаний и инструменты модерации доступны через кнопки.\n"
+        "Команды: /help.",
         parse_mode="HTML",
         reply_markup=build_main_keyboard(forum_url, is_owner=bool(message.from_user and message.from_user.id == int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0"))),
     )
 
 
+async def cmd_help(message: Message) -> None:
+    """List supported forum and moderation commands."""
+    await message.answer(
+        "🛡 <b>F-rum-Bot — команды</b>\n\n"
+        "<b>Форум:</b>\n"
+        "/profile НИК — профиль XenForo\n"
+        "/punish НИК — статус наказания\n"
+        "/stats — статистика форума\n\n"
+        "<b>Модерация группы:</b>\n"
+        "/warn ID — предупреждение\n"
+        "/warns ID — посмотреть предупреждения\n"
+        "/clearwarns ID — сбросить предупреждения\n"
+        "/mute ID — мут на 10 минут\n"
+        "/unmute ID — снять мут\n"
+        "/ban ID и /unban ID — блокировка и снятие блокировки\n"
+        "/kick ID — исключить участника\n"
+        "/purge N — удалить последние 1–100 сообщений\n"
+        "/modstats — статистика модерации за 7 дней\n"
+        "/settings — настройки антифлуда и ссылок\n"
+        "/modlog — журнал модерации\n"
+        "/report причина — пожаловаться на сообщение (ответом)\n"
+        "/reports — очередь жалоб\n"
+        "/reportclose ID — закрыть жалобу\n"
+        "/blacklist add/del/list — общий чёрный список\n"
+        "/nick set Имя или /nick ID — никнеймы группы\n"
+        "/role add/del/list — дополнительные модераторы\n"
+        "/myrole — моя системная должность\n"
+        "/staff — состав системной команды\n"
+        "/staffinfo ID — карточка сотрудника\n"
+        "/setrole ID КЛЮЧ — назначить системную должность\n"
+        "/staffremove ID — снять системную должность\n"
+        "/stafflog — журнал назначений\n"
+        "/rolehelp — справка по должностям\n"
+        "/syshealth — техническая диагностика (тех. роли)\n"
+        "/reporthelp — регламент поддержки\n"
+        "/connect — подключить группу (владелец бота).\n\n"
+        "Команды модерации доступны владельцу и администраторам подключённой группы. "
+        "Боту нужны права администратора.",
+        parse_mode="HTML",
+    )
+
+
 async def cmd_menu_callback(callback: CallbackQuery) -> None:
-    """Route navigation and owner controls through inline buttons."""
-    data = callback.data or ""
+    """Handle moderation menu navigation and owner actions."""
     await callback.answer()
     message = callback.message
     if message is None:
         return
-    PENDING_INPUTS.pop(callback.from_user.id, None)
+    data = callback.data or ""
     owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    is_owner = owner_id > 0 and callback.from_user.id == owner_id
+
+    if data == "menu:home":
+        await message.answer(
+            "Главное меню модерации:",
+            reply_markup=build_main_keyboard(get_forum_url(), is_owner=is_owner),
+        )
+        return
+    if data.startswith("menu:"):
+        section = data.split(":", 1)[1]
+        if section in {"profile", "punish"}:
+            PENDING_INPUTS[callback.from_user.id] = section
+            prompt = "Отправьте ник пользователя форума для поиска профиля." if section == "profile" else "Отправьте ник пользователя форума для проверки наказания."
+            await message.answer(prompt)
+        elif section == "stats":
+            await send_forum_stats(message)
+        else:
+            await message.answer("Выберите инструмент модерации:", reply_markup=build_section_keyboard())
+        return
 
     if data == "owner_panel" or data.startswith("owner:"):
-        if owner_id <= 0 or callback.from_user.id != owner_id:
+        if not is_owner:
             await message.answer("⛔ Панель доступна только владельцу бота.")
             return
         if data == "owner_panel":
             count = await database.registered_chat_count()
-            await message.answer(owner_summary(owner_id, count), parse_mode="HTML", reply_markup=build_owner_keyboard())
+            await message.answer(
+                owner_summary(owner_id, count),
+                parse_mode="HTML",
+                reply_markup=build_owner_keyboard(),
+            )
             return
         action = data.split(":", 1)[1]
         if action in {"warn", "mute", "unmute"}:
             if message.chat.type == "private":
-                await message.answer("Откройте меню владельца прямо в подключённой группе, затем выберите действие модерации.", reply_markup=build_owner_keyboard())
+                await message.answer(
+                    "Откройте панель в подключённой группе и выберите действие там.",
+                    reply_markup=build_owner_keyboard(),
+                )
             else:
                 PENDING_INPUTS[callback.from_user.id] = f"mod_{action}"
-                await message.answer("Отправьте Telegram ID участника. Бот проверит права и выполнит действие.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✖️ Отмена", callback_data="input:cancel")]]))
+                await message.answer(
+                    "Отправьте Telegram ID участника или ответьте на его сообщение.",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                        InlineKeyboardButton(text="✖️ Отмена", callback_data="input:cancel")
+                    ]]),
+                )
             return
         if action in {"summary", "chats"}:
             count = await database.registered_chat_count()
@@ -645,73 +475,22 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
             await message.answer(f"🆔 Ваш Telegram ID: <code>{owner_id}</code>", parse_mode="HTML", reply_markup=build_owner_keyboard())
         elif message.chat.type == "private":
             hints = {
-                "settings": "Откройте эту панель в нужной группе, чтобы изменить её настройки.",
-                "modlog": "Откройте эту панель в нужной группе, чтобы посмотреть журнал модерации.",
-                "connect": "Добавьте бота в нужную группу и нажмите «Подключить эту группу» прямо в ней.",
+                "settings": "Откройте эту панель в нужной группе, чтобы изменить настройки.",
+                "modlog": "Откройте эту панель в нужной группе, чтобы посмотреть журнал.",
+                "connect": "Добавьте бота в группу и выполните /connect от имени владельца.",
             }
-            await message.answer(hints.get(action, "Это действие доступно внутри подключённой группы."), reply_markup=build_owner_keyboard())
+            await message.answer(hints.get(action, "Это действие доступно в подключённой группе."), reply_markup=build_owner_keyboard())
         elif action == "settings":
-            actor_message = message.model_copy(update={"from_user": callback.from_user})
-            await show_group_settings(actor_message, callback.bot, owner_id)
+            await show_group_settings(message.model_copy(update={"from_user": callback.from_user}), callback.bot, owner_id)
         elif action == "modlog":
-            actor_message = message.model_copy(update={"from_user": callback.from_user})
-            await show_moderation_log(actor_message, callback.bot, owner_id)
+            await show_moderation_log(message.model_copy(update={"from_user": callback.from_user}), callback.bot, owner_id)
         elif action == "connect":
-            actor_message = message.model_copy(update={"from_user": callback.from_user})
-            await register_group(actor_message, callback.bot, owner_id)
+            await register_group(message.model_copy(update={"from_user": callback.from_user}), callback.bot, owner_id)
         return
 
-    if data.startswith("input:"):
-        action = data.split(":", 1)[1]
-        prompts = {
-            "faction": "Введите действие: info — информация; members — состав; claim — занять свободное лидерство; promote ID / demote ID — изменить ранг; kick ID — исключить; transfer ID — передать лидерство.",
-            "family": "Введите одно из доступных действий: info — информация о семье; create НАЗВАНИЕ — создать семью; join ID — вступить по ID; leave — покинуть семью.",
-            "tournament": "Введите действие (например: create Название 500, join ID, finish ID FAMILY_ID).",
-            "gov": "Введите действие госслужбы (например: departments, profile, join ID, salary, tasks).",
-            "service": "Введите действие службы (например: profile, apply МВД, tasks, leave).",
-            "med": "Введите действие медицины (например: profile, centers, apply ID, tasks, leave).",
-            "edu": "Введите действие образования (например: profile, institutions, groups, enroll ID).",
-            "bus": "Введите действие транспорта (например: routes, tickets, ticket 1, history).",
-            "taxi": "Введите действие такси (например: orders, order ROUTE FROM TO).",
-            "event": "Введите действие события (например: mine, join fair, leave fair).",
-        }
-        if action == "cancel":
-            await message.answer("Ввод отменён.")
-        elif action in prompts:
-            PENDING_INPUTS[callback.from_user.id] = action
-            await message.answer(prompts[action], reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✖️ Отмена", callback_data="input:cancel")]]))
-        return
-
-    if data == "menu:home":
-        await message.answer("Главное меню:", reply_markup=build_main_keyboard(get_forum_url(), is_owner=owner_id > 0 and callback.from_user.id == owner_id))
-    elif data.startswith("menu:"):
-        section = data.split(":", 1)[1]
-        prompts = {
-            "profile": "Для поиска профиля нажмите кнопку и затем отправьте ник игрока.",
-            "punish": "Для проверки статуса нажмите кнопку и затем отправьте ник игрока.",
-        }
-        if section in prompts:
-            PENDING_INPUTS[callback.from_user.id] = section
-            await message.answer(prompts[section])
-        else:
-            await message.answer("Выберите действие:", reply_markup=build_section_keyboard(section))
-
-
-async def cmd_view_callback(callback: CallbackQuery) -> None:
-    """Open read-only screens from the button menus."""
-    actions = {
-        "game": show_game_profile, "daily": claim_daily_reward, "top": show_leaderboard,
-        "achievements": show_achievements, "jobs": show_jobs, "work": show_work,
-        "factions": show_factions, "shop": show_shop, "inventory": show_inventory,
-        "property": show_properties, "garage": show_garage, "phone": show_phone,
-        "city": show_city, "places": show_places, "events": show_events,
-        "quests": show_quests, "reputation": show_reputation, "tournaments": show_tournaments,
-    }
-    await callback.answer()
-    action = (callback.data or "").split(":", 1)[1]
-    if callback.message and action in actions:
-        actor_message = callback.message.model_copy(update={"from_user": callback.from_user})
-        await actions[action](actor_message)
+    if data == "input:cancel":
+        PENDING_INPUTS.pop(callback.from_user.id, None)
+        await message.answer("Ввод отменён.")
 
 
 async def lookup_profile_for_message(message: Message) -> tuple[int, dict, str] | None:
@@ -863,53 +642,184 @@ async def group_unmute_handler(message: Message, bot: Bot) -> None:
         await unmute_member(message, bot, owner_id)
 
 
+async def group_ban_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await ban_member(message, bot, owner_id)
+
+
+async def group_unban_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await unban_member(message, bot, owner_id)
+
+
+async def group_kick_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await kick_member(message, bot, owner_id)
+
+
+async def group_purge_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await purge_messages(message, bot, owner_id)
+
+
+async def group_warns_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await show_warnings(message, bot, owner_id)
+
+
+async def group_clearwarns_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await clear_warnings(message, bot, owner_id)
+
+
+async def group_modstats_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await show_moderation_stats(message, bot, owner_id)
+
+
 async def button_input_handler(message: Message) -> None:
-    """Consume text input requested by a button and route it to the feature handler."""
+    """Consume requested forum lookup or moderation target input."""
     if not message.from_user or not message.text:
         return
     action = PENDING_INPUTS.pop(message.from_user.id, None)
     if not action:
         return
     if action in {"profile", "punish"}:
-        synthetic_message = message.model_copy(update={"text": f"/{action} {message.text.strip()}"})
-        await (cmd_profile if action == "profile" else cmd_punish)(synthetic_message)
+        synthetic = message.model_copy(update={"text": f"/{action} {message.text.strip()}"})
+        await (cmd_profile if action == "profile" else cmd_punish)(synthetic)
         return
-    from types import SimpleNamespace
-
-    handlers = {
-        "faction": manage_faction, "family": manage_family,
-        "tournament": manage_tournament, "gov": manage_government,
-        "service": manage_service, "med": manage_medical,
-        "edu": manage_education, "bus": manage_transport,
-        "taxi": manage_taxi, "event": manage_city_event,
-    }
     if action in {"mod_warn", "mod_mute", "mod_unmute"}:
-        moderation_handlers = {"mod_warn": group_warn_handler, "mod_mute": group_mute_handler, "mod_unmute": group_unmute_handler}
-        await moderation_handlers[action](message, message.bot)
-        return
-    handler = handlers.get(action)
-    if handler:
-        await handler(message, SimpleNamespace(command=action, args=message.text.strip(), prefix="/", mention=None))
+        synthetic = message.model_copy(update={"text": message.text.strip()})
+        handlers = {
+            "mod_warn": group_warn_handler,
+            "mod_mute": group_mute_handler,
+            "mod_unmute": group_unmute_handler,
+        }
+        await handlers[action](synthetic, message.bot)
+
+
+async def advanced_reports_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await reports_command(message, bot, owner_id)
+
+
+async def advanced_reportclose_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await reportclose_command(message, bot, owner_id)
+
+
+async def advanced_blacklist_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await blacklist_command(message, bot, owner_id)
+
+
+async def advanced_nickname_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await nickname_command(message, bot, owner_id)
+
+
+async def advanced_role_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await role_command(message, bot, owner_id)
+
+
+async def system_staff_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await staff_command(message, owner_id)
+
+
+async def system_myrole_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await myrole_command(message, owner_id)
+
+
+async def system_staffinfo_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await staffinfo_command(message, owner_id)
+
+
+async def system_setrole_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await setrole_command(message, owner_id)
+
+
+async def system_staffremove_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await staffremove_command(message, owner_id)
+
+
+async def system_stafflog_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await stafflog_command(message, owner_id)
+
+
+async def system_rolehelp_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await rolehelp_command(message, owner_id)
+
+
+async def system_syshealth_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await syshealth_command(message, owner_id)
+
+
+async def system_reporthelp_handler(message: Message) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await reporthelp_command(message, owner_id)
 
 
 def create_dispatcher() -> Dispatcher:
-    """Configure and return the Telegram dispatcher."""
+    """Configure the moderation-first Telegram dispatcher."""
     dispatcher = Dispatcher()
-    # /start remains the technical entry point; all feature navigation uses buttons.
     dispatcher.message.register(cmd_start, Command("start"))
+    dispatcher.message.register(cmd_help, Command("help"))
+    dispatcher.message.register(cmd_profile, Command("profile"))
+    dispatcher.message.register(cmd_punish, Command("punish"))
+    dispatcher.message.register(send_forum_stats, Command("stats"))
+    dispatcher.message.register(cmd_owner, Command("owner"))
+    dispatcher.message.register(cmd_myid, Command("myid"))
+    dispatcher.message.register(cmd_chats, Command("chats"))
+    dispatcher.message.register(group_register_handler, Command("connect"))
+    dispatcher.message.register(group_settings_handler, Command("settings"))
+    dispatcher.message.register(group_modlog_handler, Command("modlog"))
+    dispatcher.message.register(group_warn_handler, Command("warn"))
+    dispatcher.message.register(group_mute_handler, Command("mute"))
+    dispatcher.message.register(group_unmute_handler, Command("unmute"))
+    dispatcher.message.register(group_ban_handler, Command("ban"))
+    dispatcher.message.register(group_unban_handler, Command("unban"))
+    dispatcher.message.register(group_kick_handler, Command("kick"))
+    dispatcher.message.register(group_purge_handler, Command("purge"))
+    dispatcher.message.register(group_warns_handler, Command("warns"))
+    dispatcher.message.register(group_clearwarns_handler, Command("clearwarns"))
+    dispatcher.message.register(group_modstats_handler, Command("modstats"))
+    dispatcher.message.register(report_command, Command("report"))
+    dispatcher.message.register(advanced_reports_handler, Command("reports"))
+    dispatcher.message.register(advanced_reportclose_handler, Command("reportclose"))
+    dispatcher.message.register(advanced_blacklist_handler, Command("blacklist"))
+    dispatcher.message.register(advanced_nickname_handler, Command("nick"))
+    dispatcher.message.register(advanced_role_handler, Command("role"))
+    dispatcher.message.register(system_staff_handler, Command("staff"))
+    dispatcher.message.register(system_myrole_handler, Command("myrole"))
+    dispatcher.message.register(system_staffinfo_handler, Command("staffinfo"))
+    dispatcher.message.register(system_setrole_handler, Command("setrole"))
+    dispatcher.message.register(system_staffremove_handler, Command("staffremove"))
+    dispatcher.message.register(system_stafflog_handler, Command("stafflog"))
+    dispatcher.message.register(system_rolehelp_handler, Command("rolehelp"))
+    dispatcher.message.register(system_syshealth_handler, Command("syshealth"))
+    dispatcher.message.register(system_reporthelp_handler, Command("reporthelp"))
     dispatcher.message.register(button_input_handler, lambda message: bool(message.from_user and message.from_user.id in PENDING_INPUTS))
     dispatcher.message.register(group_moderation_handler)
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
     dispatcher.callback_query.register(cmd_menu_callback, F.data.startswith("menu:"))
     dispatcher.callback_query.register(cmd_menu_callback, F.data.startswith("owner:"))
-    dispatcher.callback_query.register(cmd_menu_callback, F.data.startswith("input:"))
-    dispatcher.callback_query.register(cmd_view_callback, F.data.startswith("view:"))
-    dispatcher.callback_query.register(handle_game_callback, F.data.startswith("game:"))
-    dispatcher.callback_query.register(handle_work_callback, F.data.startswith("work:"))
-    dispatcher.callback_query.register(handle_org_callback, F.data.startswith("org:"))
-    dispatcher.callback_query.register(handle_economy_callback, F.data.startswith("eco:"))
-    dispatcher.callback_query.register(handle_phone_callback, F.data.startswith("phone:"))
-    dispatcher.callback_query.register(handle_quest_callback, F.data.startswith("quest:"))
+    dispatcher.callback_query.register(cmd_menu_callback, F.data == "input:cancel")
     dispatcher.callback_query.register(group_setting_callback, F.data.startswith("cfg:"))
     return dispatcher
 
@@ -935,7 +845,41 @@ async def main() -> None:
         LOGGER.info("PostgreSQL connection established")
         runner = await start_web_server(port)
         await bot.delete_webhook(drop_pending_updates=True)
-        await bot.delete_my_commands()
+        await bot.set_my_commands([
+            BotCommand(command="start", description="Открыть главное меню"),
+            BotCommand(command="help", description="Список команд"),
+            BotCommand(command="profile", description="Профиль форума"),
+            BotCommand(command="punish", description="Проверить наказание"),
+            BotCommand(command="stats", description="Статистика форума"),
+            BotCommand(command="connect", description="Подключить группу"),
+            BotCommand(command="settings", description="Настройки модерации"),
+            BotCommand(command="modlog", description="Журнал модерации"),
+            BotCommand(command="modstats", description="Статистика модерации"),
+            BotCommand(command="report", description="Отправить жалобу"),
+            BotCommand(command="reports", description="Очередь жалоб"),
+            BotCommand(command="reportclose", description="Закрыть жалобу"),
+            BotCommand(command="blacklist", description="Общий чёрный список"),
+            BotCommand(command="nick", description="Никнеймы группы"),
+            BotCommand(command="role", description="Роли модерации"),
+            BotCommand(command="myrole", description="Моя системная должность"),
+            BotCommand(command="staff", description="Состав системной команды"),
+            BotCommand(command="staffinfo", description="Карточка сотрудника"),
+            BotCommand(command="setrole", description="Назначить системную должность"),
+            BotCommand(command="staffremove", description="Снять системную должность"),
+            BotCommand(command="stafflog", description="Журнал назначений"),
+            BotCommand(command="rolehelp", description="Справка по должностям"),
+            BotCommand(command="syshealth", description="Техническая диагностика"),
+            BotCommand(command="reporthelp", description="Регламент поддержки"),
+            BotCommand(command="warn", description="Выдать предупреждение"),
+            BotCommand(command="warns", description="Проверить предупреждения"),
+            BotCommand(command="clearwarns", description="Сбросить предупреждения"),
+            BotCommand(command="mute", description="Ограничить на 10 минут"),
+            BotCommand(command="unmute", description="Снять ограничение"),
+            BotCommand(command="ban", description="Заблокировать участника"),
+            BotCommand(command="unban", description="Снять блокировку"),
+            BotCommand(command="kick", description="Исключить участника"),
+            BotCommand(command="purge", description="Очистить сообщения"),
+        ])
         await dispatcher.start_polling(bot)
     finally:
         if runner is not None:

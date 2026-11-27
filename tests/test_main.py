@@ -110,20 +110,21 @@ class ProfileFormattingTests(unittest.TestCase):
             build_stats_message({}, "https://forum.example/"),
         )
 
-    def test_button_submenus_include_all_major_gameplay_sections(self):
-        for section in ("game", "work", "organizations", "economy", "city", "quests", "tournaments", "services"):
-            with self.subTest(section=section):
-                keyboard = build_section_keyboard(section)
-                callbacks = {
-                    button.callback_data
-                    for row in keyboard.inline_keyboard
-                    for button in row
-                    if button.callback_data
-                }
-                self.assertTrue(callbacks)
-                self.assertIn("menu:home", callbacks)
+    def test_moderation_menu_contains_core_actions(self):
+        keyboard = build_section_keyboard()
+        callbacks = {
+            button.callback_data
+            for row in keyboard.inline_keyboard
+            for button in row
+            if button.callback_data
+        }
+        self.assertIn("owner:warn", callbacks)
+        self.assertIn("owner:mute", callbacks)
+        self.assertIn("owner:settings", callbacks)
+        self.assertIn("owner:modlog", callbacks)
+        self.assertIn("menu:home", callbacks)
 
-    def test_main_keyboard_shows_button_sections_and_owner_only_panel(self):
+    def test_main_keyboard_is_moderation_first_and_owner_panel_is_private(self):
         public_keyboard = build_main_keyboard("https://forum.example/")
         public_callbacks = {
             button.callback_data
@@ -131,9 +132,11 @@ class ProfileFormattingTests(unittest.TestCase):
             for button in row
             if button.callback_data
         }
-        self.assertIn("menu:game", public_callbacks)
-        self.assertIn("menu:economy", public_callbacks)
+        self.assertIn("menu:profile", public_callbacks)
+        self.assertIn("menu:punish", public_callbacks)
+        self.assertIn("menu:stats", public_callbacks)
         self.assertNotIn("owner_panel", public_callbacks)
+        self.assertFalse(any(button.web_app for row in public_keyboard.inline_keyboard for button in row))
 
         owner_keyboard = build_main_keyboard("https://forum.example/", is_owner=True)
         owner_callbacks = {
@@ -143,7 +146,6 @@ class ProfileFormattingTests(unittest.TestCase):
             if button.callback_data
         }
         self.assertIn("owner_panel", owner_callbacks)
-
 
 
 class XenForoApiTests(unittest.IsolatedAsyncioTestCase):
