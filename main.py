@@ -27,6 +27,7 @@ from testing import create_test_command, add_question_command, send_test_command
 from chat_roles import roles_command, newrole_command, delrole_command, set_chat_role_command, remove_chat_role_command, editcmd_command, gm_command, rolelog_command, command_permissions_command
 from user_stats import ChatActivityMiddleware, user_stats_command
 from group_info import admins_command, chatinfo_command, rules_command, setrules_command
+from support_system import ensure_support_schema, register_support_routes, register_support_bot
 
 load_dotenv()
 
@@ -507,6 +508,7 @@ async def start_web_server(port: int) -> web.AppRunner:
     app.router.add_get("/api/dashboard", panel_dashboard)
     app.router.add_get("/api/moderation", panel_moderation)
     app.router.add_post("/api/reports/{report_id:[0-9]+}/close", panel_close_report)
+    register_support_routes(app)
     runner = web.AppRunner(app, access_log=LOGGER)
     await runner.setup()
 
@@ -1261,6 +1263,7 @@ def create_dispatcher() -> Dispatcher:
     """Configure the moderation-first Telegram dispatcher."""
     dispatcher = Dispatcher()
     dispatcher.message.outer_middleware(ChatActivityMiddleware())
+    register_support_bot(dispatcher)
     dispatcher.message.register(cmd_start, Command("start"))
     dispatcher.message.register(cmd_help, Command("help"))
     dispatcher.message.register(cmd_profile, Command("profile"))
@@ -1385,7 +1388,8 @@ async def main() -> None:
 
     try:
         await database.connect()
-        LOGGER.info("PostgreSQL connection established")
+        await ensure_support_schema()
+        LOGGER.info("PostgreSQL connection established; support schema ready")
         runner = await start_web_server(port)
         await bot.delete_webhook(drop_pending_updates=True)
         await bot.set_my_commands([
@@ -1414,7 +1418,11 @@ async def main() -> None:
             BotCommand(command="stafflog", description="Журнал назначений"),
             BotCommand(command="rolehelp", description="Справка по должностям"),
             BotCommand(command="syshealth", description="Техническая диагностика"),
-            BotCommand(command="reporthelp", description="Регламент поддержки"),
+            BotCommand(command="reporthelp", description="Регламент обработки жалоб"),
+            BotCommand(command="support", description="Открыть службу поддержки"),
+            BotCommand(command="supportqueue", description="Очередь обращений поддержки"),
+            BotCommand(command="supportreply", description="Ответить на обращение"),
+            BotCommand(command="supportclose", description="Закрыть обращение"),
             BotCommand(command="createtest", description="Создать тест (системная команда 80+)"),
             BotCommand(command="testadd", description="Добавить вопрос в тест"),
             BotCommand(command="sendtest", description="Выдать тест пользователю"),
