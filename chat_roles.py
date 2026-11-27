@@ -151,6 +151,9 @@ async def set_chat_role_command(message: Message, owner_id: int) -> None:
     if not message.from_user:
         return
     actor_priority = await effective_chat_priority(message, owner_id)
+    if actor_priority < 80:
+        await message.reply("⛔ Назначать роли могут только сотрудники с приоритетом 80+.")
+        return
     parts = (message.text or "").split(maxsplit=2)
     if len(parts) != 3 or not parts[1].isdigit():
         await message.reply("Формат: /chatrole TELEGRAM_ID КЛЮЧ_ИЛИ_НАЗВАНИЕ_РОЛИ.")
@@ -188,12 +191,27 @@ async def remove_chat_role_command(message: Message, owner_id: int) -> None:
     if not message.from_user:
         return
     actor_priority = await effective_chat_priority(message, owner_id)
+    if actor_priority < 80:
+        await message.reply("⛔ Снимать роли могут только сотрудники с приоритетом 80+.")
+        return
     parts = (message.text or "").split()
     if len(parts) != 2 or not parts[1].isdigit():
         await message.reply("Формат: /removerole TELEGRAM_ID.")
         return
+    target_id = int(parts[1])
+    if target_id == message.from_user.id:
+        await message.reply("Нельзя снять роль самому себе.")
+        return
+    try:
+        target_member = await message.bot.get_chat_member(message.chat.id, target_id)
+        if target_member.status in {"creator", "administrator"}:
+            await message.reply("Нельзя снимать роли владельца и администраторов Telegram.")
+            return
+    except Exception:
+        await message.reply("Не удалось проверить участника. Действие отменено.")
+        return
     removed = await database.remove_chat_role_guarded(
-        message.chat.id, int(parts[1]), message.from_user.id, actor_priority
+        message.chat.id, target_id, message.from_user.id, actor_priority
     )
     await message.answer("✅ Роль снята." if removed else "⛔ Нельзя снять роль равного/старшего сотрудника или роль отсутствует.")
 
