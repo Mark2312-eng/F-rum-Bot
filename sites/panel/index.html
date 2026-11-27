@@ -43,7 +43,7 @@
         <div class="dash-actions"><span class="live-label"><span class="status-dot"></span> СЕССИЯ АКТИВНА</span><button id="refresh" class="button button-secondary" type="button">↻ Обновить</button><button id="export-csv" class="button button-quiet" type="button">↓ Экспорт CSV</button><button id="logout" class="button button-quiet" type="button">Выйти</button></div>
       </div>
       <nav class="dash-nav" aria-label="Разделы панели">
-        <a class="active" href="#overview">Обзор</a><a href="#reports">Жалобы</a><a href="#members">Участники</a><a href="#people">Роли</a><a href="#audit">Журнал</a><a href="#blacklist-audit">Чёрный список</a><a href="#system-staff">Команда</a><a href="#groups">Группы</a><a href="#tests">Тесты</a><a href="#results">Результаты</a><a href="#support">Поддержка</a>
+        <a class="active" href="#overview">Обзор</a><a href="#reports">Жалобы</a><a href="#members">Участники</a><a href="#people">Роли</a><a href="#audit">Журнал</a><a href="#blacklist-audit">Чёрный список</a><a href="#system-staff">Команда</a><a href="#staff-applications">Заявки</a><a href="#groups">Группы</a><a href="#tests">Тесты</a><a href="#results">Результаты</a><a href="#support">Поддержка</a>
       </nav>
       <div id="overview" class="section-label"><span>01 / СВОДКА</span><span id="updated-at">Загрузка данных…</span></div>
       <div id="stats" class="stats" aria-live="polite"></div>
@@ -69,6 +69,8 @@
       <section id="blacklist-audit" class="block"><div class="block-head"><div><span class="section-index">03.4</span><h2>История глобального чёрного списка</h2><p>Кто добавил, обновил или удалил запись и по какой причине</p></div><span id="blacklist-audit-count" class="count">—</span></div><div id="blacklist-audit-table"></div></section>
 
       <section id="system-staff" class="block"><div class="block-head"><div><span class="section-index">04.2</span><h2>Системная команда</h2><p>Глобальные должности, кто назначил сотрудника и история изменений</p></div><span id="system-staff-count" class="count">—</span></div><div id="system-staff-table"></div><div class="block-head"><div><h3>История назначений</h3><p>Последние 100 изменений системных должностей</p></div><span id="system-staff-history-count" class="count">—</span></div><div id="system-staff-history"></div></section>
+
+      <section id="staff-applications" class="block"><div class="block-head"><div><span class="section-index">04.3</span><h2>Заявки в команду</h2><p>Очередь кандидатов и решения владельца</p></div><span id="staff-applications-count" class="count">—</span></div><div id="staff-applications-table"></div></section>
       <section id="support" class="block">
         <div class="block-head"><div><span class="section-index">04</span><h2>Поддержка</h2><p>Общие обращения с сайта и из Telegram</p></div><span id="support-count" class="count">—</span></div>
         <div class="support-panel-toolbar"><label>Фильтр <select id="support-filter"><option value="active">Активные</option><option value="all">Все</option><option value="closed">Закрытые</option></select></label><button id="support-reload" class="button button-secondary" type="button">↻ Обновить</button></div>
