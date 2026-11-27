@@ -805,6 +805,17 @@ class Database:
                ORDER BY priority DESC, title""", chat_id
         )
 
+    async def get_chat_role_audit(self, chat_id: int, limit: int = 30):
+        pool = self._require_pool()
+        safe_limit = max(1, min(int(limit), 50))
+        return await pool.fetch(
+            """SELECT actor_id, target_id, action, details, created_at
+               FROM chat_role_audit
+               WHERE chat_id = $1
+               ORDER BY created_at DESC, id DESC
+               LIMIT $2""", chat_id, safe_limit
+        )
+
     async def get_chat_member_role(self, chat_id: int, user_id: int):
         pool = self._require_pool()
         return await pool.fetchrow(
