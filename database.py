@@ -821,13 +821,13 @@ class Database:
         )
         return True
 
-    async def get_chat_command_priority(self, chat_id: int, command_name: str) -> int:
+    async def get_chat_command_priority(self, chat_id: int, command_name: str) -> int | None:
         pool = self._require_pool()
         value = await pool.fetchval(
             "SELECT min_priority FROM chat_command_permissions WHERE chat_id = $1 AND command_name = $2",
             chat_id, command_name.lower(),
         )
-        return int(value) if value is not None else 0
+        return int(value) if value is not None else None
 
 
 database = Database()
