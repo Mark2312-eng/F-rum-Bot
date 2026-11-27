@@ -642,6 +642,7 @@ class Database:
         clean_reason = (reason or "Причина не указана")[:300]
         async with pool.acquire() as connection:
             async with connection.transaction():
+                await connection.execute("SELECT pg_advisory_xact_lock($1)", user_id)
                 existing = await connection.fetchrow(
                     "SELECT user_id FROM global_blacklist WHERE user_id = $1 FOR UPDATE", user_id
                 )
