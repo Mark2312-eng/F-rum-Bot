@@ -156,3 +156,8 @@ tbody tr:hover{background:#18251d}
 .member-history-stats span{padding:10px;border-radius:9px;background:rgba(255,255,255,.035);color:#89978d;font-size:11px}
 .member-history-stats b{display:block;margin-top:5px;color:#e8eee9;font-size:13px}
 @media(max-width:600px){.member-history{padding:12px}.member-history-head{align-items:flex-start}}
+
+.member-history-filters{display:grid;grid-template-columns:minmax(150px,1fr) minmax(170px,1fr) auto;align-items:end;gap:10px;margin:0 0 14px}
+.member-history-filters label{display:grid;gap:6px;color:#89978d;font-size:11px}
+.member-history-filters select,.member-history-filters input{width:100%;min-height:39px;padding:8px 10px;border:1px solid var(--line,#29342e);border-radius:8px;background:var(--surface,#111a15);color:inherit;font:inherit}
+@media(max-width:600px){.member-history-filters{grid-template-columns:1fr}.member-history-filters .button{width:100%}}

@@ -395,12 +395,13 @@ class PanelRoleAuthorizationTests(unittest.IsolatedAsyncioTestCase):
             "first_seen_at": created_at,
         }
         event = {"actor_id": 7, "action": "warn", "details": "Правила группы",
-                 "created_at": created_at}
+                 "created_at": created_at, "category": "moderation"}
         pool = MagicMock()
         pool.fetchrow = AsyncMock(return_value=member)
         pool.fetch = AsyncMock(return_value=[event])
         request = MagicMock()
         request.match_info = {"chat_id": "-1001", "user_id": "42"}
+        request.query = {}
 
         with patch("main._panel_require_owner", new=AsyncMock(return_value=123)):
             with patch("main.database.is_chat_registered", new=AsyncMock(return_value=True)):
@@ -412,7 +413,38 @@ class PanelRoleAuthorizationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["member"]["warning_count"], 2)
         self.assertEqual(payload["events"][0]["action"], "warn")
         self.assertEqual(payload["events"][0]["actor_id"], 7)
+        self.assertEqual(payload["events"][0]["category"], "moderation")
         pool.fetch.assert_awaited_once()
+        self.assertIn("UNION ALL", pool.fetch.await_args.args[0])
+        self.assertIn("chat_role_audit", pool.fetch.await_args.args[0])
+
+
+    async def test_member_history_rejects_unknown_event_category(self):
+        from unittest.mock import patch
+
+        request = MagicMock()
+        request.match_info = {"chat_id": "-1001", "user_id": "42"}
+        request.query = {"category": "other"}
+        with patch("main._panel_require_owner", new=AsyncMock(return_value=123)):
+            with patch("main.database.is_chat_registered", new=AsyncMock(return_value=True)):
+                with patch("main.database._require_pool") as get_pool:
+                    with self.assertRaises(web.HTTPBadRequest):
+                        await panel_member_history(request)
+        get_pool.assert_not_called()
+
+    async def test_member_history_rejects_invalid_actor_filter(self):
+        from unittest.mock import patch
+
+        request = MagicMock()
+        request.match_info = {"chat_id": "-1001", "user_id": "42"}
+        request.query = {"actor_id": "not-an-id"}
+        with patch("main._panel_require_owner", new=AsyncMock(return_value=123)):
+            with patch("main.database.is_chat_registered", new=AsyncMock(return_value=True)):
+                with patch("main.database._require_pool") as get_pool:
+                    with self.assertRaises(web.HTTPBadRequest):
+                        await panel_member_history(request)
+        get_pool.assert_not_called()
+
 
 
 

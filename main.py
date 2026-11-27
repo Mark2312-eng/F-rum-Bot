@@ -666,6 +666,17 @@ async def panel_member_history(request: web.Request) -> web.Response:
     if not await database.is_chat_registered(chat_id):
         raise web.HTTPNotFound(text="Группа не найдена.")
 
+    category = request.query.get("category", "").strip().lower() or None
+    if category not in (None, "moderation", "roles"):
+        raise web.HTTPBadRequest(text="Некорректный тип события.")
+    actor_raw = request.query.get("actor_id", "").strip()
+    try:
+        actor_id_filter = int(actor_raw) if actor_raw else None
+    except ValueError:
+        raise web.HTTPBadRequest(text="Некорректный ID модератора.")
+    if actor_id_filter is not None and actor_id_filter <= 0:
+        raise web.HTTPBadRequest(text="Некорректный ID модератора.")
+
     pool = database._require_pool()
     member = await pool.fetchrow(
         """SELECT a.chat_id, COALESCE(c.title, '') AS chat_title,
@@ -688,11 +699,21 @@ async def panel_member_history(request: web.Request) -> web.Response:
         raise web.HTTPNotFound(text="Участник не найден в этой группе.")
 
     events = await pool.fetch(
-        """SELECT actor_id, action, details, created_at
-           FROM moderation_events
-           WHERE chat_id = $1 AND target_id = $2
-           ORDER BY created_at DESC, id DESC LIMIT 50""",
-        chat_id, user_id,
+        """SELECT actor_id, action, details, created_at, category
+           FROM (
+             SELECT id, actor_id, action, details, created_at, 'moderation'::text AS category
+             FROM moderation_events
+             WHERE chat_id = $1 AND target_id = $2
+             UNION ALL
+             SELECT id, actor_id, action, details, created_at, 'roles'::text AS category
+             FROM chat_role_audit
+             WHERE chat_id = $1 AND target_id = $2
+           ) history
+           WHERE ($3::text IS NULL OR category = $3)
+             AND ($4::bigint IS NULL OR actor_id = $4)
+           ORDER BY created_at DESC, id DESC
+           LIMIT 100""",
+        chat_id, user_id, category, actor_id_filter,
     )
     payload = {
         "member": {
@@ -710,6 +731,7 @@ async def panel_member_history(request: web.Request) -> web.Response:
         "events": [{
             "actor_id": row["actor_id"],
             "action": row["action"],
+            "category": row["category"],
             "details": row["details"],
             "created_at": row["created_at"].isoformat(),
         } for row in events],
