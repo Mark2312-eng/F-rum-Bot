@@ -265,6 +265,11 @@ async def support_reply(request: web.Request) -> web.Response:
                 ticket_id, user_id)
             if not ticket or ticket["status"] == "closed":
                 return _cors(request, web.json_response({"error": "Обращение закрыто или не найдено."}, status=404))
+            recent = await conn.fetchval(
+                "SELECT COUNT(*) FROM support_messages WHERE ticket_id=$1 AND author_id=$2 AND created_at >= NOW() - INTERVAL '1 minute'",
+                ticket_id, user_id)
+            if int(recent or 0) >= 8:
+                return _cors(request, web.json_response({"error": "Слишком много сообщений за короткое время."}, status=429))
             await conn.execute(
                 "INSERT INTO support_messages(ticket_id,author_id,author_role,body) VALUES($1,$2,'user',$3)",
                 ticket_id, user_id, body)
@@ -343,10 +348,10 @@ async def staff_ticket_assign(request: web.Request) -> web.Response:
         return _cors(request, web.json_response({"error": "Недостаточно прав."}, status=403))
     ticket_id = int(request.match_info["ticket_id"])
     row = await database._require_pool().fetchrow(
-        "UPDATE support_tickets SET assigned_to=$2,updated_at=NOW() WHERE id=$1 AND status<>'closed' RETURNING id",
+        "UPDATE support_tickets SET assigned_to=$2,updated_at=NOW() WHERE id=$1 AND status<>'closed' AND (assigned_to IS NULL OR assigned_to=$2) RETURNING id",
         ticket_id, user_id)
     if not row:
-        return _cors(request, web.json_response({"error": "Обращение не найдено или закрыто."}, status=404))
+        return _cors(request, web.json_response({"error": "Обращение уже назначено другому сотруднику, закрыто или не найдено."}, status=409))
     return _cors(request, web.json_response({"ok": True, "assigned_to": user_id}))
 
 
@@ -408,12 +413,12 @@ async def support_callback(callback: CallbackQuery) -> None:
             await callback.message.answer("У вас пока нет обращений.")
         else:
             labels = {"open": "Открыто", "waiting_user": "Ожидает вас", "waiting_support": "Ожидает поддержки", "closed": "Закрыто"}
-            text = "\\n".join(f"#{r['id']} · {escape(r['subject'])} · {labels.get(r['status'], r['status'])}" for r in rows)
+            text = "\n".join(f"#{r['id']} · {escape(r['subject'])} · {labels.get(r['status'], r['status'])}" for r in rows)
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text=f"Ответить на #{r['id']}", callback_data=f"support:reply:{r['id']}")]
                 for r in rows if r["status"] != "closed"
             ])
-            await callback.message.answer(text + "\\n\\nВыберите обращение, чтобы ответить:", reply_markup=keyboard, parse_mode="HTML")
+            await callback.message.answer(text + "\n\nВыберите обращение, чтобы ответить:", reply_markup=keyboard, parse_mode="HTML")
         await callback.answer()
     elif callback.data and callback.data.startswith("support:reply:"):
         raw_id = callback.data.rsplit(":", 1)[-1]
