@@ -16,6 +16,10 @@ from main import (
     format_forum_date,
     get_forum_url,
     get_port,
+    PENDING_INPUTS,
+    has_pending_input,
+    pop_pending_input,
+    set_pending_input,
 )
 
 
@@ -146,6 +150,33 @@ class ProfileFormattingTests(unittest.TestCase):
             if button.callback_data
         }
         self.assertIn("owner_panel", owner_callbacks)
+
+
+
+class PendingInputSecurityTests(unittest.TestCase):
+    def setUp(self):
+        PENDING_INPUTS.clear()
+
+    def tearDown(self):
+        PENDING_INPUTS.clear()
+
+    def test_pending_input_is_scoped_to_chat_and_user_and_consumed_once(self):
+        set_pending_input(-1001, 42, "profile")
+
+        self.assertTrue(has_pending_input(-1001, 42))
+        self.assertFalse(has_pending_input(-1002, 42))
+        self.assertIsNone(pop_pending_input(-1002, 42))
+        self.assertEqual(pop_pending_input(-1001, 42), "profile")
+        self.assertIsNone(pop_pending_input(-1001, 42))
+
+    def test_expired_pending_input_is_rejected(self):
+        from unittest.mock import patch
+
+        with patch("main.time.monotonic", return_value=100.0):
+            set_pending_input(-1001, 42, "mod_warn")
+        with patch("main.time.monotonic", return_value=401.0):
+            self.assertFalse(has_pending_input(-1001, 42))
+            self.assertIsNone(pop_pending_input(-1001, 42))
 
 
 class XenForoApiTests(unittest.IsolatedAsyncioTestCase):
