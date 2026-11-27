@@ -12,6 +12,7 @@ from html import escape
 from urllib.parse import urljoin, urlsplit
 
 import aiohttp
+import asyncpg
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -71,6 +72,54 @@ def has_pending_input(chat_id: int, user_id: int) -> bool:
         PENDING_INPUTS.pop((chat_id, user_id), None)
         return False
     return True
+
+
+POLLING_ADVISORY_LOCK_ID = 741_852_963_147
+POLLING_LOCK_RETRY_SECONDS = 5
+
+
+async def acquire_telegram_polling_lock() -> asyncpg.Connection:
+    """Hold a PostgreSQL session lock for the entire Telegram polling lifetime.
+
+    A dedicated connection is used so normal application queries cannot release
+    the session-level advisory lock by returning a pooled connection.
+    """
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is required for the Telegram polling lock")
+
+    while True:
+        connection: asyncpg.Connection | None = None
+        try:
+            connection = await asyncpg.connect(
+                dsn=database_url,
+                ssl="require",
+                timeout=10,
+                command_timeout=10,
+            )
+            acquired = await connection.fetchval(
+                "SELECT pg_try_advisory_lock($1)", POLLING_ADVISORY_LOCK_ID
+            )
+            if acquired:
+                LOGGER.info("Telegram polling advisory lock acquired")
+                return connection
+            LOGGER.warning(
+                "Telegram polling is already owned by another instance; retrying in %s seconds",
+                POLLING_LOCK_RETRY_SECONDS,
+            )
+        except asyncio.CancelledError:
+            if connection is not None:
+                await connection.close()
+            raise
+        except Exception:
+            LOGGER.exception("Unable to acquire Telegram polling lock; retrying")
+
+        if connection is not None:
+            try:
+                await connection.close()
+            except Exception:
+                LOGGER.exception("Failed to close unused polling-lock connection")
+        await asyncio.sleep(POLLING_LOCK_RETRY_SECONDS)
 
 
 def get_port(value: str | None = None) -> int:
