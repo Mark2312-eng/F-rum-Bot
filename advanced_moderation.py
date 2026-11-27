@@ -21,7 +21,12 @@ async def _allowed(message: Message, bot: Bot, owner_id: int) -> bool:
     member = await bot.get_chat_member(message.chat.id, message.from_user.id)
     if member.status in {"administrator", "creator"}:
         return True
-    return await database.is_custom_moderator(message.chat.id, message.from_user.id)
+    if await database.is_custom_moderator(message.chat.id, message.from_user.id):
+        return True
+    from system_roles import has_permission
+    import os
+    configured_owner = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    return await has_permission(message.from_user.id, configured_owner, "reports")
 
 
 async def report_command(message: Message, bot: Bot) -> None:
