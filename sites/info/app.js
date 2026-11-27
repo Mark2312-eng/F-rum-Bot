@@ -206,6 +206,7 @@
     supportWorkspace.hidden = false;
     document.getElementById('supportWelcome').textContent = user?.first_name ? `Здравствуйте, ${user.first_name}` : 'Вы вошли через Telegram';
     await loadSupportTickets();
+    await loadStaffApplications();
   };
 
   window.onTelegramAuth = async user => {
@@ -269,6 +270,39 @@
     } catch (error) { supportFeedback.textContent = error.message; }
     finally { button.disabled = false; }
   });
+
+  const applicationFeedback = document.getElementById('staffApplicationFeedback');
+  const applicationHistory = document.getElementById('staffApplicationHistory');
+  const roleLabels = { helper: 'Помощник', moderator: 'Модератор', support: 'Сотрудник поддержки' };
+  const applicationStatus = { pending: 'На рассмотрении', approved: 'Одобрена', rejected: 'Отклонена' };
+  const loadStaffApplications = async () => {
+    if (!applicationHistory) return;
+    try {
+      const data = await supportRequest('/applications');
+      applicationHistory.innerHTML = data.applications.length ? data.applications.map(item =>
+        '<article class="support-ticket"><b>Заявка #' + escapeHtml(item.id) + ' · ' + escapeHtml(roleLabels[item.requested_role] || item.requested_role) + '</b>' +
+        '<small>' + escapeHtml(applicationStatus[item.status] || item.status) + ' · ' + new Date(item.created_at).toLocaleString('ru-RU') + '</small>' +
+        (item.review_note ? '<p>' + escapeHtml(item.review_note) + '</p>' : '') + '</article>'
+      ).join('') : '<p class="support-empty">Вы ещё не отправляли заявки.</p>';
+    } catch (error) { applicationHistory.innerHTML = '<p class="support-empty">' + escapeHtml(error.message) + '</p>'; }
+  };
+  document.getElementById('staffApplicationForm')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"]');
+    const payload = Object.fromEntries(new FormData(form).entries());
+    button.disabled = true;
+    if (applicationFeedback) applicationFeedback.textContent = 'Отправляем заявку…';
+    try {
+      const data = await supportRequest('/applications', { method: 'POST', body: JSON.stringify(payload) });
+      form.reset();
+      if (applicationFeedback) applicationFeedback.textContent = 'Заявка #' + data.application_id + ' отправлена.';
+      await loadStaffApplications();
+    } catch (error) { if (applicationFeedback) applicationFeedback.textContent = error.message; }
+    finally { button.disabled = false; }
+  });
+  document.getElementById('staffApplicationRefresh')?.addEventListener('click', loadStaffApplications);
+
   document.getElementById('supportRefresh')?.addEventListener('click', loadSupportTickets);
   document.getElementById('supportLogout')?.addEventListener('click', async () => {
     try { await supportRequest('/logout', { method: 'POST' }); } catch {}

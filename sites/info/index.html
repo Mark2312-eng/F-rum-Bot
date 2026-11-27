@@ -118,6 +118,21 @@
             </div>
             <div class="support-history"><div class="support-history-head"><h3>Мои обращения</h3><button id="supportRefresh" type="button">Обновить ↻</button></div><div id="supportTickets" class="support-ticket-list"><p class="support-empty">Загрузка обращений…</p></div><div id="supportThread" class="support-thread" hidden></div></div>
           </div>
+          <section class="support-create staff-application-section" aria-labelledby="staffApplicationTitle">
+            <h3 id="staffApplicationTitle">Заявка в команду</h3>
+            <p>Выберите доступную роль и расскажите о своём опыте. Решение появится в истории ниже.</p>
+            <form id="staffApplicationForm">
+              <label for="staffApplicationRole">Желаемая должность</label>
+              <select id="staffApplicationRole" name="requested_role" required><option value="helper">Помощник</option><option value="moderator">Модератор</option><option value="support">Сотрудник поддержки</option></select>
+              <label for="staffApplicationExperience">Опыт</label>
+              <textarea id="staffApplicationExperience" name="experience" maxlength="1200" required rows="3" placeholder="Расскажите о своём опыте"></textarea>
+              <label for="staffApplicationMotivation">Почему хотите вступить в команду?</label>
+              <textarea id="staffApplicationMotivation" name="motivation" maxlength="2000" required rows="4" placeholder="Опишите мотивацию и чем сможете помочь"></textarea>
+              <button class="button button-primary" type="submit">Отправить заявку <span>↗</span></button>
+            </form>
+            <p class="support-feedback" id="staffApplicationFeedback" role="status" aria-live="polite"></p>
+            <div class="support-history"><div class="support-history-head"><h3>Мои заявки</h3><button id="staffApplicationRefresh" type="button">Обновить ↻</button></div><div id="staffApplicationHistory" class="support-ticket-list"><p class="support-empty">Войдите через Telegram, чтобы посмотреть заявки.</p></div></div>
+          </section>
         </div>
       </div>
     </section>
