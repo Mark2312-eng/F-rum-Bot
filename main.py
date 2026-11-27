@@ -525,6 +525,25 @@ async def panel_moderation(request: web.Request) -> web.Response:
     return _panel_cors(request, web.json_response(payload))
 
 
+async def panel_system_staff(request: web.Request) -> web.Response:
+    """Return the global staff roster and assignment audit to the owner."""
+    owner_id = await _panel_require_owner(request)
+    staff = await database.list_system_staff()
+    history = await database.get_system_staff_log(limit=100)
+    return _panel_cors(request, web.json_response({
+        "owner_id": owner_id,
+        "staff": [{
+            "user_id": row["user_id"], "role_key": row["role_key"],
+            "assigned_by": row["assigned_by"], "assigned_at": row["assigned_at"].isoformat(),
+        } for row in staff],
+        "history": [{
+            "actor_id": row["actor_id"], "target_id": row["target_id"],
+            "action": row["action"], "details": row["details"],
+            "created_at": row["created_at"].isoformat(),
+        } for row in history],
+    }))
+
+
 async def panel_global_blacklist_history(request: web.Request) -> web.Response:
     """Return the global blacklist audit trail to the bot owner only."""
     await _panel_require_owner(request)
@@ -840,6 +859,7 @@ async def start_web_server(port: int, bot: Bot) -> web.AppRunner:
     app.router.add_get("/api/dashboard", panel_dashboard)
     app.router.add_get("/api/moderation", panel_moderation)
     app.router.add_get("/api/blacklist/history", panel_global_blacklist_history)
+    app.router.add_get("/api/system/staff", panel_system_staff)
     app.router.add_get("/api/people", panel_people)
     app.router.add_get("/api/members/{chat_id:-[0-9]+}/{user_id:[0-9]+}/history", panel_member_history)
     app.router.add_post("/api/members/role", panel_assign_member_role)
