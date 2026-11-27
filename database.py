@@ -210,7 +210,7 @@ class Database:
                             ADD CONSTRAINT moderation_tests_chat_role_fk
                             FOREIGN KEY (chat_id, role_key)
                             REFERENCES chat_role_definitions(chat_id, role_key)
-                            ON DELETE CASCADE;
+                            ON DELETE RESTRICT;
                     END IF;
                 END $migration$;
                 CREATE INDEX IF NOT EXISTS moderation_tests_creator_idx
