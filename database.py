@@ -200,7 +200,7 @@ class Database:
                 );
                 ALTER TABLE moderation_tests
                     DROP CONSTRAINT IF EXISTS moderation_tests_role_key_check;
-                DO $ BEGIN
+                DO $migration$ BEGIN
                     IF NOT EXISTS (
                         SELECT 1 FROM pg_constraint
                         WHERE conname = 'moderation_tests_chat_role_fk'
@@ -212,7 +212,7 @@ class Database:
                             REFERENCES chat_role_definitions(chat_id, role_key)
                             ON DELETE CASCADE;
                     END IF;
-                END $;
+                END $migration$;
                 CREATE INDEX IF NOT EXISTS moderation_tests_creator_idx
                     ON moderation_tests (creator_id, created_at DESC);
                 CREATE TABLE IF NOT EXISTS moderation_test_questions (
