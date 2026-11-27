@@ -37,6 +37,56 @@ ROLES.update(LEGACY_ROLES)
 
 ALIASES = {key: key for key in ROLES}
 ALIASES.update({item["title"].lower().replace(" ", "_"): key for key, item in ROLES.items()})
+
+# Previous display names remain accepted as input aliases; stored role keys do not change.
+LEGACY_TITLE_ALIASES = {
+    "Команда проекта": "project_team",
+    "Специальный администратор": "special_admin",
+    "Зам. спец. администратора": "deputy_special_admin",
+    "Главный администратор": "head_administrator",
+    "Зам. главного администратора": "deputy_chief_admin",
+    "Куратор администрации": "admin_curator",
+    "Старший администратор": "senior_admin",
+    "Администратор": "administrator",
+    "Старший модератор": "senior_moderator",
+    "Модератор": "chat_moderator",
+    "Младший модератор": "junior_moderator",
+    "Лидер": "leader",
+    "Зарегистрированный пользователь": "registered_user",
+    "Главный технический специалист": "chief_tech_specialist",
+    "Заместитель ГТС": "deputy_gts",
+    "Куратор технических специалистов": "tech_curator",
+    "Зам. куратора тех. специалистов": "deputy_tech_curator",
+    "Технический специалист": "tech_specialist",
+    "Заместитель главного тестировщика": "deputy_chief_tester",
+    "Глава контроля качества": "qa_head",
+    "Контроль качества": "qa_specialist",
+    "Старший тестировщик": "senior_tester",
+    "Тестировщик": "tester",
+    "Младший тестировщик": "junior_tester",
+    "Руководитель модераторов (Discord)": "discord_moderation_lead",
+    "Зам. руководителя модераторов": "deputy_discord_moderation_lead",
+    "Куратор ГМ": "gm_curator",
+    "Осн. зам. главного администратора": "principal_deputy_chief_admin",
+    "Куратор организаций": "organizations_curator",
+    "Куратор агентов поддержки": "support_agents_curator",
+    "Ст. следящий за соц. организациями": "senior_social_orgs_supervisor",
+    "Ст. следящий за агентами поддержки": "senior_support_agents_supervisor",
+    "Зам. куратора организаций": "deputy_organizations_curator",
+    "Зам. куратора агентов поддержки": "deputy_support_agents_curator",
+    "Ст. следящий за крим. организациями": "senior_criminal_orgs_supervisor",
+    "Следящий за УМВД": "supervisor_umvd",
+    "Следящий за армией": "supervisor_army",
+    "Следящий за агентами поддержки": "supervisor_support_agents",
+    "Следящий за ГИБДД": "supervisor_gibdd",
+    "Следящий за ФСБ": "supervisor_fsb",
+    "Следящий за правительством": "supervisor_government",
+    "Следящий за Л-ОПГ": "supervisor_l_opg",
+    "Следящий за В-ОПГ": "supervisor_v_opg",
+    "Следящий за А-ОПГ": "supervisor_a_opg",
+    "Собиратель красных ролей": "red_roles_collector",
+}
+ALIASES.update({"_".join(title.lower().replace("-", " ").split()): key for title, key in LEGACY_TITLE_ALIASES.items()})
 ALIASES.update({
     # Explicit canonical titles take precedence over legacy display-name collisions.
     "главный_администратор": "head_administrator",
