@@ -30,7 +30,7 @@ class ChatRoleHelperTests(unittest.TestCase):
     def test_sensitive_commands_have_higher_defaults(self):
         self.assertEqual(DEFAULT_COMMAND_PRIORITIES["role"], 80)
         self.assertEqual(DEFAULT_COMMAND_PRIORITIES["blacklist"], 80)
-        self.assertIn("editcmd", MANAGEABLE_COMMANDS)
+        self.assertIn("ban", MANAGEABLE_COMMANDS)
         self.assertIn("reportclose", MANAGEABLE_COMMANDS)
 
 
