@@ -710,7 +710,11 @@ class Database:
                     "SELECT EXISTS(SELECT 1 FROM chat_member_roles WHERE chat_id = $1 AND role_key = $2)",
                     chat_id, role_key,
                 )
-                if assigned:
+                used_by_test = await connection.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM moderation_tests WHERE chat_id = $1 AND role_key = $2)",
+                    chat_id, role_key,
+                )
+                if assigned or used_by_test:
                     return False
                 await connection.execute(
                     "DELETE FROM chat_role_definitions WHERE chat_id = $1 AND role_key = $2",
