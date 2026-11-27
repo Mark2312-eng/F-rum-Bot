@@ -4,7 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#080d18">
-  <meta name="description" content="F-rum-Bot — система управления Telegram-сообществом VISE RUSSIA: модерация, роли, тестирование и интеграция с XenForo.">
+  <meta name="description" content="F-rum-Bot — инструменты модерации Telegram-сообщества VISE RUSSIA, управления ролями и тестирования команды.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="F-rum-Bot — управление сообществом VISE RUSSIA">
+  <meta property="og:description" content="Модерация Telegram-групп, роли, тестирование команды и инструменты сообщества.">
+  <meta property="og:image" content="assets/hero-illustration.svg">
   <title>F-rum-Bot — управление сообществом VISE RUSSIA</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,6 +17,8 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Перейти к содержимому</a>
+  <div class="scroll-progress" aria-hidden="true"><span id="scrollProgress"></span></div>
   <header class="site-header">
     <a class="brand" href="#" aria-label="F-rum-Bot — главная"><span class="brand-mark">F</span><span>F-rum<span class="brand-accent">-Bot</span><small>VISE RUSSIA COMMUNITY TOOLS</small></span></a>
     <nav class="desktop-nav" aria-label="Основная навигация">
@@ -29,7 +35,7 @@
     <a class="header-cta" href="https://t.me/ViseRussiaHelpForumBot" target="_blank" rel="noopener">Открыть бота <span>↗</span></a>
   </header>
 
-  <main>
+  <main id="main-content">
     <section class="hero">
       <div class="hero-copy">
         <div class="status"><span class="status-dot"></span> ИНСТРУМЕНТЫ СООБЩЕСТВА VISE RUSSIA</div>
@@ -92,6 +98,7 @@
 
     <section class="closing-cta"><p class="eyebrow">VISE RUSSIA / COMMUNITY TOOLS</p><h2>Порядок начинается<br><span>с правильных инструментов.</span></h2><p>Откройте бота и изучите доступные команды.</p><a class="button button-primary" href="https://t.me/ViseRussiaHelpForumBot" target="_blank" rel="noopener">Открыть F-rum-Bot <span>↗</span></a></section>
   </main>
+  <button class="back-to-top" id="backToTop" type="button" aria-label="Наверх">↑</button>
   <footer><a class="brand footer-brand" href="#"><span class="brand-mark">F</span><span>F-rum<span class="brand-accent">-Bot</span><small>VISE RUSSIA COMMUNITY TOOLS</small></span></a><span>© F-rum-Bot · VISE RUSSIA</span><a href="https://github.com/Mark2312-eng/F-rum-Bot" target="_blank" rel="noopener">Исходный код на GitHub ↗</a></footer>
   <script src="app.js" defer></script>
 </body>

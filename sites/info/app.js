@@ -3,6 +3,22 @@
   const search = document.getElementById('commandSearch');
   const list = document.getElementById('commandList');
   const count = document.getElementById('searchCount');
+  const progress = document.getElementById('scrollProgress');
+  const backToTop = document.getElementById('backToTop');
+  const mobileNav = document.querySelector('.mobile-nav');
+
+  // Keep the page position visible and provide a quick return to the top.
+  const updateScrollUI = () => {
+    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+    const percent = scrollable > 0 ? (window.scrollY / scrollable) * 100 : 0;
+    if (progress) progress.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+    if (backToTop) backToTop.classList.toggle('is-visible', window.scrollY > 520);
+  };
+  window.addEventListener('scroll', updateScrollUI, { passive: true });
+  window.addEventListener('resize', updateScrollUI);
+  updateScrollUI();
+  backToTop?.addEventListener('click', () => window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' }));
+  mobileNav?.querySelectorAll('a').forEach(link => link.addEventListener('click', () => { mobileNav.open = false; }));
 
   // Reveal content as it enters the viewport; keep everything visible if unsupported.
   const revealTargets = document.querySelectorAll('.section, .workflow-inner, .feature-card, .closing-cta');
@@ -32,6 +48,7 @@
         if (match) visible += 1;
       });
       count.textContent = query ? `Найдено команд: ${visible}` : 'Показаны все команды';
+      count.setAttribute('aria-label', query ? `Найдено команд: ${visible}` : `Всего команд: ${visible}`);
     };
     search.addEventListener('input', updateSearch);
     document.addEventListener('keydown', event => {
@@ -69,12 +86,15 @@
           if (!copied) throw new Error('Clipboard unavailable');
         }
         button.textContent = 'Скопировано';
+        button.dataset.state = 'success';
         button.setAttribute('aria-label', `Скопировано: ${command}`);
       } catch {
         button.textContent = 'Не удалось';
+        button.dataset.state = 'error';
       }
       window.setTimeout(() => {
         button.textContent = original;
+        delete button.dataset.state;
         button.setAttribute('aria-label', `Скопировать ${command}`);
       }, 1600);
     });
