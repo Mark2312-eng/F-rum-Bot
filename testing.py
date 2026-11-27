@@ -16,7 +16,7 @@ from aiogram.types import (
 )
 
 from database import database
-from system_roles import get_role, has_permission
+from system_roles import has_permission
 
 # Tests may grant any local role below the Chief Admin threshold.
 AUTO_ASSIGNABLE_ROLE_MIN = 1
