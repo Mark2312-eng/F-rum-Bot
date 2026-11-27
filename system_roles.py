@@ -20,6 +20,9 @@ LEGACY_ROLES = {
     "deputy": {"title": "Заместитель директора", "rank": 80, "permissions": {"staff_manage", "staff_view", "moderation", "reports", "settings", "support"}},
     "chief_curator": {"title": "Главный куратор", "rank": 70, "permissions": {"staff_view", "moderation", "reports", "settings"}},
     "curator": {"title": "Куратор", "rank": 60, "permissions": {"staff_view", "moderation", "reports"}},
+    "chief_admin": {"title": "Главный администратор", "rank": 55, "permissions": {"staff_view", "moderation", "reports", "settings"}},
+    "admin": {"title": "Администратор", "rank": 50, "permissions": {"moderation", "reports"}},
+    "moderator": {"title": "Модератор", "rank": 30, "permissions": {"moderation", "reports"}},
     "developer": {"title": "Разработчик", "rank": 45, "permissions": {"staff_view", "technical"}},
     "senior_mod": {"title": "Старший модератор", "rank": 40, "permissions": {"moderation", "reports"}},
     "tech_admin": {"title": "Технический администратор", "rank": 38, "permissions": {"technical"}},
@@ -41,7 +44,7 @@ ALIASES.update({
 
 
 def role_key(value: str) -> str | None:
-    key = value.strip().lower().replace("-", "_")
+    key = "_".join(value.strip().lower().replace("-", " ").split())
     return ALIASES.get(key)
 
 
