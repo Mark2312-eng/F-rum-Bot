@@ -103,8 +103,17 @@ async def newrole_command(message: Message, owner_id: int) -> None:
     except ValueError:
         await message.reply("Приоритет должен быть числом от 1 до 79.")
         return
-    if not 1 <= len(title) <= 32 or not 1 <= priority <= 79 or priority >= actor_priority:
-        await message.reply("Название: 1–32 символа. Приоритет: 1–79 и строго ниже вашего.")
+    reserved_titles = {
+        "owner", "chief_admin", "admin", "moderator", "helper", "user",
+        "владелец", "главный администратор", "администратор", "модератор", "помощник", "участник",
+    }
+    if (
+        not 1 <= len(title) <= 32
+        or not 1 <= priority <= 79
+        or priority >= actor_priority
+        or title.casefold() in reserved_titles
+    ):
+        await message.reply("Название: 1–32 символа, не системное. Приоритет: 1–79 и строго ниже вашего.")
         return
     key = role_slug(title)
     created = await database.create_chat_role(
