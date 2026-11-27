@@ -19,14 +19,19 @@ async def _allowed(message: Message, bot: Bot, owner_id: int) -> bool:
     if message.from_user.id == owner_id:
         return True
     member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-    if member.status in {"administrator", "creator"}:
-        return True
-    if await database.is_custom_moderator(message.chat.id, message.from_user.id):
-        return True
-    from system_roles import has_permission
-    import os
-    configured_owner = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
-    return await has_permission(message.from_user.id, configured_owner, "reports")
+    authorized = member.status in {"administrator", "creator"}
+    if not authorized:
+        authorized = await database.get_chat_member_priority(message.chat.id, message.from_user.id) >= 20
+    if not authorized:
+        from system_roles import has_permission
+        import os
+        configured_owner = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+        authorized = await has_permission(message.from_user.id, configured_owner, "reports")
+    if not authorized:
+        return False
+    from chat_roles import command_priority_allowed
+    command_name = (message.text or "").split(maxsplit=1)[0].split("@", 1)[0].lstrip("/!")
+    return await command_priority_allowed(message, owner_id, command_name)
 
 
 async def report_command(message: Message, bot: Bot) -> None:
