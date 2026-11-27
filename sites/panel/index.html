@@ -1,6 +1,54 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>F-rum-Bot — закрытая панель</title><link rel="stylesheet" href="style.css"></head><body><main>
-<header><a class="brand" href="#">F-rum<span>-Bot</span></a><span class="private">PRIVATE CONTROL</span></header>
-<section id="login-view" class="login"><div class="eyebrow">ЗАКРЫТЫЙ ДОСТУП</div><h1>Панель управления</h1><p>Вход только через Telegram-аккаунт владельца. Данные панели доступны после серверной проверки подписи Telegram.</p><div id="login-widget"><p class="notice">Подключаем авторизацию…</p></div><p id="message" class="message" role="status"></p><a class="back" href="https://github.com/Mark2312-eng/F-rum-Bot">← Репозиторий проекта</a></section>
-<section id="dashboard" hidden><div class="dash-head"><div><div class="eyebrow">АДМИНИСТРАТОР</div><h1>Обзор системы</h1></div><button id="logout">Выйти</button></div><div id="stats" class="stats"></div><section class="block"><h2>Подключённые группы</h2><div id="chats"></div></section><section class="block"><h2>Тесты</h2><div id="tests"></div></section><section class="block"><h2>Последние результаты</h2><div id="results"></div></section></section>
-<footer>Доступ ограничен · Сессия автоматически истекает через час</footer></main><script src="app.js"></script></body></html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1110">
+  <meta name="description" content="Закрытая панель управления F-rum-Bot. Вход только для владельца через Telegram.">
+  <title>F-rum-Bot — панель управления</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="https://f-rum-bot-info.onrender.com" aria-label="F-rum-Bot — главная"><span class="brand-mark">F</span><span>F-rum<span class="brand-accent">-Bot</span></span></a>
+      <span class="private"><span class="status-dot"></span> PRIVATE CONTROL</span>
+    </header>
+
+    <section id="login-view" class="login">
+      <div class="login-copy">
+        <div class="eyebrow">ЗАКРЫТЫЙ ДОСТУП <span> / 01</span></div>
+        <h1>Всё под<br><span>контролем.</span></h1>
+        <p class="lead">Центр управления модерацией F-rum-Bot. Войдите через Telegram — доступ проверяется сервером.</p>
+        <div class="trust-list">
+          <div><span class="check">✓</span><span>Только аккаунт владельца</span></div>
+          <div><span class="check">✓</span><span>Защищённая проверка Telegram</span></div>
+          <div><span class="check">✓</span><span>Сессия автоматически завершается</span></div>
+        </div>
+      </div>
+      <div class="auth-card">
+        <div class="auth-icon">↗</div>
+        <h2>Вход в систему</h2>
+        <p>Подтвердите личность в Telegram, чтобы открыть панель.</p>
+        <div id="login-widget" class="widget-slot" aria-live="polite"><p class="notice"><span class="spinner"></span> Подготавливаем безопасный вход…</p></div>
+        <p id="message" class="message" role="status" aria-live="polite"></p>
+        <div class="auth-note"><span class="lock">▣</span> Мы не запрашиваем пароль или код Telegram.</div>
+      </div>
+      <a class="back" href="https://f-rum-bot-info.onrender.com">← На сайт проекта</a>
+    </section>
+
+    <section id="dashboard" hidden>
+      <div class="dash-head"><div><div class="eyebrow">АДМИНИСТРАТОР</div><h1>Обзор системы</h1></div><button id="logout">Выйти</button></div>
+      <div id="stats" class="stats"></div>
+      <section class="block"><h2>Подключённые группы</h2><div id="chats"></div></section>
+      <section class="block"><h2>Тесты</h2><div id="tests"></div></section>
+      <section class="block"><h2>Последние результаты</h2><div id="results"></div></section>
+    </section>
+    <footer><span>F-RUM-BOT</span><span>ДОСТУП ОГРАНИЧЕН · СЕССИЯ 60 МИНУТ</span></footer>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
