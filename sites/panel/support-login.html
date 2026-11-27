@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1110">
+  <title>Вход через Telegram — F-rum-Bot</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body{display:grid;place-items:center;min-height:100vh;padding:24px}
+    .login-card{width:min(100%,440px);padding:30px;border:1px solid #34443a;border-radius:16px;background:#15211d;text-align:center}
+    .login-card h1{font-size:28px;letter-spacing:-1px;margin:0 0 12px}
+    .login-card p{color:#94a49b;font-size:13px;line-height:1.7}
+    #login-widget{display:grid;place-items:center;min-height:76px;margin:20px 0;padding:12px;border:1px solid #2a3a31;border-radius:10px;background:#0c1411}
+    #login-message{color:#ffb7ad;min-height:18px}
+  </style>
+</head>
+<body>
+  <main class="login-card">
+    <div class="auth-icon" style="margin:0 auto 18px">↗</div>
+    <h1>Вход через Telegram</h1>
+    <p>Подтвердите аккаунт Telegram. После проверки окно вернёт вас на страницу поддержки.</p>
+    <div id="login-widget"><span class="notice">Подготавливаем безопасный вход…</span></div>
+    <p id="login-message" role="status" aria-live="polite"></p>
+  </main>
+  <script>
+    const API = 'https://f-rum-bot.onrender.com';
+    window.onTelegramAuth = user => {
+      if (!window.opener) {
+        document.getElementById('login-message').textContent = 'Откройте окно входа с сайта поддержки.';
+        return;
+      }
+      window.opener.postMessage({type:'f-rum-support-auth', user}, 'https://f-rum-bot-info.onrender.com');
+      window.close();
+    };
+    (async () => {
+      try {
+        const response = await fetch(API + '/api/config');
+        if (!response.ok) throw new Error('Не удалось загрузить настройки входа.');
+        const config = await response.json();
+        const script = document.createElement('script');
+        script.src = 'https://telegram.org/js/telegram-widget.js?22';
+        script.async = true;
+        script.dataset.telegramLogin = String(config.bot_username || 'ViseRussiaHelpForumBot').replace(/^@/, '');
+        script.dataset.size = 'large';
+        script.dataset.userpic = 'false';
+        script.dataset.requestAccess = 'write';
+        script.dataset.onauth = 'onTelegramAuth(user)';
+        document.getElementById('login-widget').replaceChildren(script);
+      } catch (error) {
+        document.getElementById('login-message').textContent = error.message;
+      }
+    })();
+  </script>
+</body>
+</html>
