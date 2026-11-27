@@ -4,7 +4,7 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
-from aiogram.types import Chat, Message, User
+from aiogram.types import CallbackQuery, Chat, Message, User
 
 from privacy_broadcast import (
     ConsentGateMiddleware,
@@ -70,6 +70,23 @@ class ConsentGateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "handled")
         handler.assert_awaited_once_with(event, {})
         check.assert_not_awaited()
+
+    async def test_private_consent_callback_is_allowed_without_message_text(self):
+        message = self.make_message("")
+        event = CallbackQuery(
+            id="callback-1",
+            from_user=message.from_user,
+            chat_instance="private-chat",
+            message=message,
+            data="consent:accept",
+        )
+        handler = AsyncMock(return_value="handled")
+        middleware = ConsentGateMiddleware()
+
+        result = await middleware(handler, event, {})
+
+        self.assertEqual(result, "handled")
+        handler.assert_awaited_once_with(event, {})
 
 
 if __name__ == "__main__":
