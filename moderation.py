@@ -60,6 +60,45 @@ async def is_moderator(message: Message, bot: Bot, owner_id: int) -> bool:
     return await has_permission(message.from_user.id, owner_id, "moderation")
 
 
+async def _can_manage_target(message: Message, bot: Bot, owner_id: int, target_id: int) -> bool:
+    """Enforce the global staff hierarchy and delegated-moderator priority."""
+    if not message.from_user:
+        return False
+
+    from system_roles import get_role, role_rank, can_manage_rank
+
+    actor_id = message.from_user.id
+    actor_rank = role_rank(await get_role(actor_id, owner_id))
+    target_rank = role_rank(await get_role(target_id, owner_id))
+
+    # Telegram group administrators receive local priority 60; delegated
+    # moderators receive priority 30. Global system rank can be higher.
+    if actor_id != owner_id:
+        try:
+            actor_member = await bot.get_chat_member(message.chat.id, actor_id)
+            if actor_member.status == "creator":
+                actor_rank = max(actor_rank, 100)
+            elif actor_member.status == "administrator":
+                actor_rank = max(actor_rank, 60)
+        except Exception:
+            pass
+    try:
+        target_member = await bot.get_chat_member(message.chat.id, target_id)
+        if target_member.status == "creator":
+            target_rank = max(target_rank, 100)
+        elif target_member.status == "administrator":
+            target_rank = max(target_rank, 60)
+    except Exception:
+        pass
+    if await database.is_custom_moderator(message.chat.id, target_id):
+        target_rank = max(target_rank, 30)
+
+    if not can_manage_rank(actor_rank, target_rank):
+        await message.reply("⛔ Нельзя применять действия к пользователю с равным или более высоким приоритетом.")
+        return False
+    return True
+
+
 async def register_group(message: Message, bot: Bot, owner_id: int) -> None:
     if not is_group(message) or not message.from_user:
         return
@@ -185,6 +224,8 @@ async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
     if target.id == owner_id or await is_chat_admin(bot, message.chat.id, target.id):
         await message.reply("Нельзя выдать предупреждение владельцу или администратору.")
         return
+    if not await _can_manage_target(message, bot, owner_id, target.id):
+        return
     count = await database.add_warning(message.chat.id, target.id)
     await database.log_moderation_event(
         message.chat.id, message.from_user.id, target.id, "warning", f"{count}/{WARNING_LIMIT}"
@@ -197,7 +238,9 @@ async def warn_member(message: Message, bot: Bot, owner_id: int) -> None:
                 permissions=ChatPermissions(can_send_messages=False),
                 until_date=int(time.time()) + 300,
             )
-            await database.reset_warnings(message.chat.id, target.id)
+            if not await _can_manage_target(message, bot, owner_id, target.id):
+        return
+    await database.reset_warnings(message.chat.id, target.id)
             await database.log_moderation_event(
                 message.chat.id, message.from_user.id, target.id, "auto_mute", "5 минут после 3 предупреждений"
             )
@@ -248,6 +291,8 @@ async def mute_member(message: Message, bot: Bot, owner_id: int) -> None:
     if target is None or target.is_bot or target.id == owner_id:
         await message.reply("Ответь на сообщение участника или укажи его Telegram ID: /mute 123456 30m.")
         return
+    if not await _can_manage_target(message, bot, owner_id, target.id):
+        return
     if await is_chat_admin(bot, message.chat.id, target.id):
         await message.reply("Нельзя ограничить администратора группы.")
         return
@@ -283,6 +328,8 @@ async def unmute_member(message: Message, bot: Bot, owner_id: int) -> None:
     target = await _get_moderation_target(message, bot)
     if target is None:
         await message.reply("Ответь на сообщение участника или укажи его Telegram ID: /unmute 123456.")
+        return
+    if not await _can_manage_target(message, bot, owner_id, target.id):
         return
     try:
         await bot.restrict_chat_member(
@@ -329,6 +376,8 @@ async def ban_member(message: Message, bot: Bot, owner_id: int) -> None:
     if target is None or target.is_bot or target.id == owner_id:
         await message.reply("Ответьте на сообщение участника или укажите ID: /ban 123456.")
         return
+    if not await _can_manage_target(message, bot, owner_id, target.id):
+        return
     if await is_chat_admin(bot, message.chat.id, target.id):
         await message.reply("Нельзя заблокировать администратора группы.")
         return
@@ -347,6 +396,8 @@ async def unban_member(message: Message, bot: Bot, owner_id: int) -> None:
     if target is None:
         await message.reply("Укажите Telegram ID пользователя: /unban 123456.")
         return
+    if not await _can_manage_target(message, bot, owner_id, target.id):
+        return
     try:
         await bot.unban_chat_member(message.chat.id, target.id, only_if_banned=True)
         await database.log_moderation_event(message.chat.id, message.from_user.id, target.id, "unban")
@@ -361,6 +412,8 @@ async def kick_member(message: Message, bot: Bot, owner_id: int) -> None:
     target = await _get_moderation_target(message, bot)
     if target is None or target.is_bot or target.id == owner_id:
         await message.reply("Ответьте на сообщение участника или укажите ID: /kick 123456.")
+        return
+    if not await _can_manage_target(message, bot, owner_id, target.id):
         return
     if await is_chat_admin(bot, message.chat.id, target.id):
         await message.reply("Нельзя исключить администратора группы.")
