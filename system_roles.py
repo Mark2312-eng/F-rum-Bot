@@ -23,7 +23,6 @@ LEGACY_ROLES = {
     "developer": {"title": "Разработчик", "rank": 45, "permissions": {"staff_view", "technical"}},
     "senior_mod": {"title": "Старший модератор", "rank": 40, "permissions": {"moderation", "reports"}},
     "tech_admin": {"title": "Технический администратор", "rank": 38, "permissions": {"technical"}},
-    "moderator": {"title": "Модератор", "rank": 30, "permissions": {"moderation", "reports"}},
     "support_lead": {"title": "Главный специалист поддержки", "rank": 25, "permissions": {"support", "reports"}},
     "junior_mod": {"title": "Младший модератор", "rank": 20, "permissions": {"moderation", "reports"}},
     "support": {"title": "Специалист поддержки", "rank": 15, "permissions": {"support"}},
