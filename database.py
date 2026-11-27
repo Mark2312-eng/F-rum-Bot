@@ -373,4 +373,71 @@ class Database:
             safe_limit,
         )
 
+
+    async def assign_system_role_guarded(
+        self, user_id: int, role_key: str, actor_id: int, owner_id: int,
+        role_ranks: dict[str, int],
+    ) -> bool:
+        """Atomically validate staff hierarchy, assign a role and write its audit event."""
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute("SELECT pg_advisory_xact_lock(726301)")
+                actor_role = "owner" if actor_id == owner_id else await connection.fetchval(
+                    "SELECT role_key FROM system_staff WHERE user_id = $1", actor_id
+                )
+                target_role = "owner" if user_id == owner_id else await connection.fetchval(
+                    "SELECT role_key FROM system_staff WHERE user_id = $1", user_id
+                )
+                actor_rank = 100 if actor_role == "owner" else role_ranks.get(actor_role, 0)
+                target_rank = 100 if target_role == "owner" else role_ranks.get(target_role, 0)
+                requested_rank = role_ranks.get(role_key, 0)
+                if user_id == actor_id or user_id == owner_id or actor_rank <= max(target_rank, requested_rank):
+                    return False
+                await connection.execute(
+                    """INSERT INTO system_staff (user_id, role_key, assigned_by)
+                       VALUES ($1, $2, $3)
+                       ON CONFLICT (user_id) DO UPDATE SET role_key = EXCLUDED.role_key,
+                       assigned_by = EXCLUDED.assigned_by, assigned_at = NOW()""",
+                    user_id, role_key, actor_id,
+                )
+                await connection.execute(
+                    """INSERT INTO system_staff_log (actor_id, target_id, action, details)
+                       VALUES ($1, $2, 'set_role', $3)""",
+                    actor_id, user_id, role_key,
+                )
+                return True
+
+    async def remove_system_role_guarded(
+        self, user_id: int, actor_id: int, owner_id: int,
+        role_ranks: dict[str, int],
+    ) -> bool:
+        """Atomically enforce hierarchy when removing a staff role and audit it."""
+        pool = self._require_pool()
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute("SELECT pg_advisory_xact_lock(726301)")
+                actor_role = "owner" if actor_id == owner_id else await connection.fetchval(
+                    "SELECT role_key FROM system_staff WHERE user_id = $1", actor_id
+                )
+                target_role = "owner" if user_id == owner_id else await connection.fetchval(
+                    "SELECT role_key FROM system_staff WHERE user_id = $1", user_id
+                )
+                actor_rank = 100 if actor_role == "owner" else role_ranks.get(actor_role, 0)
+                target_rank = 100 if target_role == "owner" else role_ranks.get(target_role, 0)
+                if user_id in {actor_id, owner_id} or not target_role or actor_rank <= target_rank:
+                    return False
+                result = await connection.execute(
+                    "DELETE FROM system_staff WHERE user_id = $1", user_id
+                )
+                if not result.endswith(" 1"):
+                    return False
+                await connection.execute(
+                    """INSERT INTO system_staff_log (actor_id, target_id, action, details)
+                       VALUES ($1, $2, 'remove_role', '')""",
+                    actor_id, user_id,
+                )
+                return True
+
+
 database = Database()
