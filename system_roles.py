@@ -178,12 +178,58 @@ async def stafflog_command(message: Message, owner_id: int) -> None:
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
+async def syshealth_command(message: Message, owner_id: int) -> None:
+    if not message.from_user or not await has_permission(message.from_user.id, owner_id, "technical"):
+        await _deny(message)
+        return
+    try:
+        pool = database._require_pool()
+        value = await pool.fetchval("SELECT 1")
+        db_status = "🟢 PostgreSQL доступен" if value == 1 else "🟡 Неожиданный ответ БД"
+    except Exception:
+        db_status = "🔴 PostgreSQL недоступен"
+    import os
+    await message.answer(
+        "🛠 <b>Техническая диагностика F-rum-Bot</b>\\n"
+        f"{db_status}\\n"
+        "Токен Telegram: " + ("настроен" if os.getenv("TELEGRAM_BOT_TOKEN") else "не настроен") + "\\n"
+        "XenForo API: " + ("настроен" if os.getenv("XF_API_KEY") else "не настроен"),
+        parse_mode="HTML",
+    )
+
+
 async def rolehelp_command(message: Message, owner_id: int) -> None:
     role = await get_role(message.from_user.id, owner_id) if message.from_user else None
-    lines = [f"🧭 <b>Должность:</b> {escape(_role_label(role))}", "", "<b>Команды системной команды</b>",
-             "/myrole — моя должность", "/staff — состав команды", "/staffinfo ID — карточка сотрудника",
-             "/setrole ID КЛЮЧ — назначить должность", "/staffremove ID — снять должность",
-             "/stafflog — журнал назначений", "/rolehelp — справка"]
-    if role == "owner" or (role in ROLES and "staff_manage" in ROLES[role]["permissions"]):
-        lines.extend(["", "<b>Ключи должностей:</b>"] + [f"{key} — {data['title']}" for key, data in ROLES.items()])
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    permissions = set() if role not in ROLES else ROLES[role]["permissions"]
+    lines = [f"🧭 <b>Должность:</b> {escape(_role_label(role))}", "", "<b>Доступные команды</b>",
+             "/myrole — моя должность", "/rolehelp — справка"]
+    if role == "owner" or "staff_view" in permissions:
+        lines.extend(["/staff — состав команды", "/staffinfo ID — карточка сотрудника", "/stafflog — журнал назначений"])
+    if role == "owner" or "staff_manage" in permissions:
+        lines.extend(["/setrole ID КЛЮЧ — назначить должность", "/staffremove ID — снять должность",
+                      "", "<b>Ключи должностей:</b>"] + [f"{key} — {data['title']}" for key, data in ROLES.items()])
+    if role == "owner" or "moderation" in permissions:
+        lines.extend(["", "<b>Модерация:</b> /warn, /warns, /clearwarns, /mute, /unmute, /ban, /unban, /kick, /purge, /modstats, /modlog, /nick"])
+    if role == "owner" or "reports" in permissions:
+        lines.extend(["", "<b>Жалобы:</b> /reports, /reportclose"])
+    if role == "owner" or "settings" in permissions:
+        lines.extend(["", "<b>Настройки:</b> /settings"])
+    if role == "owner" or "technical" in permissions:
+        lines.extend(["", "<b>Техника:</b> /syshealth"])
+    if role == "owner" or "support" in permissions:
+        lines.extend(["", "<b>Поддержка:</b> /reporthelp"])
+    await message.answer("\\n".join(lines), parse_mode="HTML")
+
+
+async def reporthelp_command(message: Message, owner_id: int) -> None:
+    if not message.from_user or not await has_permission(message.from_user.id, owner_id, "support"):
+        await _deny(message)
+        return
+    await message.answer(
+        "🎧 <b>Регламент поддержки</b>\\n"
+        "1. Уточните проблему и Telegram ID пользователя.\\n"
+        "2. Не запрашивайте пароли, коды входа или токены.\\n"
+        "3. Для нарушений используйте /report в подключённой группе.\\n"
+        "4. Передайте техническую неисправность разработчику.",
+        parse_mode="HTML",
+    )
