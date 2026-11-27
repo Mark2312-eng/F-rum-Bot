@@ -38,6 +38,10 @@ ROLES.update(LEGACY_ROLES)
 ALIASES = {key: key for key in ROLES}
 ALIASES.update({item["title"].lower().replace(" ", "_"): key for key, item in ROLES.items()})
 ALIASES.update({
+    # Explicit canonical titles take precedence over legacy display-name collisions.
+    "главный_администратор": "head_administrator",
+    "администратор": "administrator",
+    "модератор": "chat_moderator",
     "владелец_проекта": "owner",
     "владелец": "owner",
 })
