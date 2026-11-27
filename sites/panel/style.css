@@ -130,3 +130,19 @@ tbody tr:hover{background:#18251d}
 
 .support-head-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
 @media(max-width:520px){.support-conversation-head{align-items:flex-start;flex-direction:column}.support-head-actions{justify-content:flex-start}}
+
+
+.people-controls{display:grid;grid-template-columns:minmax(180px,1fr) minmax(220px,1.4fr) auto;align-items:end;gap:12px;margin:4px 0 18px}
+.field-label{display:grid;gap:7px;color:#9aaba0;font-size:10px;letter-spacing:.09em;text-transform:uppercase}
+.field-label select,.field-label input,.role-select{width:100%;min-width:0;border:1px solid #293a30;border-radius:8px;background:#111b15;color:#e6eee7;padding:11px 12px;font:inherit;font-size:12px;outline:none}
+.field-label select:focus,.field-label input:focus,.role-select:focus{border-color:#8aa77d;box-shadow:0 0 0 3px #8aa77d20}
+.people-controls .button{min-height:39px}
+.role-catalog{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 16px}
+.catalog-label{color:#718278;font:10px "DM Mono",monospace;letter-spacing:.1em}
+.role-chip{border:1px solid #2a3a30;background:#142019;border-radius:999px;padding:6px 10px;color:#c9d7cc;font-size:10px}
+.role-chip b{color:#b6d39f;margin-left:4px}
+.role-actions{display:grid;grid-template-columns:minmax(120px,1fr) auto auto;gap:6px;align-items:center;min-width:260px}
+.role-actions .button{padding:8px 10px;font-size:10px;white-space:nowrap}
+.role-select{padding:8px 9px}
+.people-note{margin:14px 0 0;color:#75847a;font-size:10px;line-height:1.7}
+@media(max-width:760px){.people-controls{grid-template-columns:1fr}.role-actions{min-width:230px}}
