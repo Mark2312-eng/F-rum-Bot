@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from database import apply_global_blacklist_audit_migration, record_legacy_schema_baseline
 
@@ -20,11 +20,12 @@ class SchemaMigrationBaselineTests(unittest.IsolatedAsyncioTestCase):
 
 class GlobalBlacklistAuditMigrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_creates_audit_table_and_records_ordered_migration(self):
-        connection = AsyncMock()
-        transaction = AsyncMock()
+        connection = MagicMock()
+        connection.execute = AsyncMock()
+        transaction = MagicMock()
+        transaction.__aenter__ = AsyncMock(return_value=None)
+        transaction.__aexit__ = AsyncMock(return_value=False)
         connection.transaction.return_value = transaction
-        transaction.__aenter__.return_value = None
-        transaction.__aexit__.return_value = False
 
         await apply_global_blacklist_audit_migration(connection)
 
