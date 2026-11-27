@@ -385,7 +385,9 @@ def register_privacy_broadcast_handlers(dispatcher: Dispatcher) -> None:
         capture_broadcast_content,
         lambda message: bool(message.from_user and message.from_user.id == _owner_id()
                              and _owner_id() in _PENDING_BROADCASTS
-                             and (message.content_type != "text" or not (message.text or "").startswith("/"))),
+                             and (message.content_type != "text"
+                                  or not (message.text or "").startswith("/")
+                                  or (message.text or "").strip().lower() == "/cancel")),
     )
     dispatcher.callback_query.register(consent_callback, F.data.startswith("consent:"))
     dispatcher.callback_query.register(subscription_callback, F.data.startswith("subscription:"))
