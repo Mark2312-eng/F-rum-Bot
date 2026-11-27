@@ -30,6 +30,7 @@ from user_stats import ChatActivityMiddleware, user_stats_command
 from group_info import admins_command, chatinfo_command, rules_command, setrules_command
 from support_system import ensure_support_schema, register_support_routes, register_support_bot
 from privacy_broadcast import ensure_privacy_schema, has_consent, has_subscription_choice, show_consent_prompt, show_subscription_prompt, register_privacy_broadcast_handlers
+from vip_stars import ensure_vip_schema, register_vip_handlers
 
 load_dotenv()
 
@@ -1146,6 +1147,15 @@ async def cmd_help(message: Message) -> None:
         "/stafflog · /rolehelp — журнал и справка\n"
         "/syshealth — диагностика (технические роли)\n"
         "/reporthelp — регламент поддержки\n\n"
+        "⭐ <b>VIP</b>\n"
+        "/vip — магазин VIP Silver / Gold / Diamond\n"
+        "/vipstatus — уровень и срок действия\n"
+        "/vipperks — возможности уровней\n"
+        "/vipprofile — моя VIP-карточка\n"
+        "/vipbadge — мой VIP-бейдж\n"
+        "/vipname ТЕКСТ — имя в карточке (Gold+)\n"
+        "/viptitle ТЕКСТ — титул в карточке (Diamond)\n"
+        "/paysupport — помощь по платежам\n\n"
         "🔗 <b>Подключение</b>\n"
         "/connect — подключить текущую группу (только владелец бота)\n\n"
         "<i>Команды модерации работают в подключённых группах. "
@@ -1630,6 +1640,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.outer_middleware(ChatActivityMiddleware())
     register_support_bot(dispatcher)
     register_privacy_broadcast_handlers(dispatcher)
+    register_vip_handlers(dispatcher)
     dispatcher.message.register(cmd_start, Command("start"))
     dispatcher.message.register(cmd_help, Command("help"))
     dispatcher.message.register(cmd_profile, Command("profile"))
@@ -1756,6 +1767,7 @@ async def main() -> None:
     try:
         await database.connect()
         await ensure_privacy_schema()
+        await ensure_vip_schema()
         await ensure_support_schema()
         LOGGER.info("PostgreSQL connection established; support schema ready")
         runner = await start_web_server(port, bot)
@@ -1766,6 +1778,14 @@ async def main() -> None:
             BotCommand(command="stop", description="Отписаться от рассылки"),
             BotCommand(command="withdraw_consent", description="Отозвать согласие и удалить запись"),
             BotCommand(command="broadcast", description="Создать рассылку (владелец)"),
+            BotCommand(command="vip", description="Магазин VIP за Stars"),
+            BotCommand(command="vipstatus", description="Статус и срок VIP"),
+            BotCommand(command="vipperks", description="Возможности VIP-уровней"),
+            BotCommand(command="vipprofile", description="Моя VIP-карточка"),
+            BotCommand(command="vipbadge", description="Мой VIP-бейдж"),
+            BotCommand(command="vipname", description="Имя в VIP-карточке (Gold+)"),
+            BotCommand(command="viptitle", description="Титул в VIP-карточке (Diamond)"),
+            BotCommand(command="paysupport", description="Помощь по платежам"),
             BotCommand(command="help", description="Список команд"),
             BotCommand(command="profile", description="Профиль форума"),
             BotCommand(command="punish", description="Проверить наказание"),
