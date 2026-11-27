@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#0b1110">
-  <meta name="description" content="Закрытая панель управления F-rum-Bot. Вход только для владельца через Telegram.">
+  <meta name="description" content="Закрытая панель управления F-rum-Bot. Вход через Telegram с проверкой системной роли.">
   <title>F-rum-Bot — панель управления</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -21,16 +21,16 @@
       <div class="login-copy">
         <div class="eyebrow">ЗАКРЫТЫЙ ДОСТУП <span> / 01</span></div>
         <h1>Всё под<br><span>контролем.</span></h1>
-        <p class="lead">Центр управления модерацией F-rum-Bot. Войдите через Telegram — доступ проверяется сервером.</p>
+        <p class="lead">Закрытая панель F-rum-Bot. Владелец и сотрудники поддержки получают доступ только к разрешённым разделам.</p>
         <div class="trust-list">
-          <div><span class="check">✓</span><span>Только аккаунт владельца</span></div>
+          <div><span class="check">✓</span><span>Доступ владельца и сотрудников с нужными правами</span></div>
           <div><span class="check">✓</span><span>Защищённая проверка Telegram</span></div>
           <div><span class="check">✓</span><span>Сессия автоматически завершается</span></div>
         </div>
       </div>
       <div class="auth-card">
         <div class="auth-icon">↗</div><h2>Вход в систему</h2>
-        <p>Подтвердите личность в Telegram, чтобы открыть панель.</p>
+        <p>Подтвердите аккаунт в Telegram. Набор доступных разделов зависит от вашей системной роли.</p>
         <div id="login-widget" class="widget-slot" aria-live="polite"><p class="notice"><span class="spinner"></span> Подготавливаем безопасный вход…</p></div>
         <p id="message" class="message" role="status" aria-live="polite"></p>
         <div class="auth-note"><span class="lock">▣</span> Мы не запрашиваем пароль или код Telegram.</div>
