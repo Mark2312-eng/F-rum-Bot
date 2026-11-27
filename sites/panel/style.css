@@ -126,3 +126,7 @@ tbody tr:hover{background:#18251d}
 #support-staff-reply textarea:focus{outline:2px solid #789e5d;outline-offset:1px}
 #support-staff-reply button{justify-self:start}
 @media(max-width:760px){.support-panel-grid{grid-template-columns:1fr}.support-queue{max-height:260px}.support-conversation{min-height:230px}}
+
+
+.support-head-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:520px){.support-conversation-head{align-items:flex-start;flex-direction:column}.support-head-actions{justify-content:flex-start}}
