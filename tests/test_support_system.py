@@ -59,6 +59,23 @@ class TelegramLoginTests(unittest.TestCase):
     def test_staff_application_roles_are_limited_to_non_privileged_roles(self):
         self.assertEqual(STAFF_APPLICATION_ROLES, {"helper", "moderator", "support"})
 
+
+    def test_interview_time_requires_timezone_and_future(self):
+        from datetime import datetime, timedelta, timezone
+        from support_system import _parse_interview_time
+        future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        self.assertIsNotNone(_parse_interview_time(future))
+        self.assertIsNone(_parse_interview_time("2035-01-01T10:00"))
+        self.assertIsNone(_parse_interview_time("not-a-date"))
+
+    def test_interview_score_is_limited_to_one_through_five(self):
+        from support_system import _valid_interview_score
+        self.assertEqual(_valid_interview_score("5"), 5)
+        self.assertEqual(_valid_interview_score(1), 1)
+        self.assertIsNone(_valid_interview_score(0))
+        self.assertIsNone(_valid_interview_score(6))
+        self.assertIsNone(_valid_interview_score("3.5"))
+
     def test_invalid_user_session_is_rejected(self):
         request = SimpleNamespace(cookies={"support_session": "987654321.9999999999.invalid"})
         self.assertIsNone(_session_user(request))
