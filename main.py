@@ -404,7 +404,7 @@ async def panel_moderation(request: web.Request) -> web.Response:
              (SELECT COUNT(*) FROM moderation_reports WHERE status = 'open') AS open_reports,
              (SELECT COUNT(*) FROM moderation_events
                 WHERE created_at >= NOW() - INTERVAL '7 days') AS events_week,
-             (SELECT COUNT(*) FROM chat_member_activity) AS members_count,
+             (SELECT COUNT(DISTINCT user_id) FROM chat_member_activity) AS members_count,
              (SELECT COUNT(*) FROM moderation_warnings WHERE warning_count > 0) AS warned_members"""
     )
     reports = await pool.fetch(
