@@ -22,6 +22,7 @@ from advanced_moderation import blacklist_command, nickname_command, report_comm
 from system_roles import staff_command, myrole_command, staffinfo_command, setrole_command, staffremove_command, stafflog_command, rolehelp_command, syshealth_command, reporthelp_command
 from testing import create_test_command, add_question_command, send_test_command, test_results_command, handle_test_start, test_answer_callback
 from chat_roles import roles_command, newrole_command, delrole_command, set_chat_role_command, remove_chat_role_command, editcmd_command, gm_command
+from user_stats import ChatActivityMiddleware, user_stats_command
 
 load_dotenv()
 
@@ -444,6 +445,7 @@ async def cmd_help(message: Message) -> None:
         "👤 <b>Форум</b>\n"
         "/profile НИК — открыть профиль участника\n"
         "/punish НИК — проверить статус наказания\n"
+        "/stats — личная статистика участника группы\n"
         "/forumstats — статистика форума\n"
         "/ping — проверить работу бота\n\n"
         "🛡 <b>Модерация группы</b>\n"
@@ -915,10 +917,12 @@ async def chat_gm_handler(message: Message) -> None:
 def create_dispatcher() -> Dispatcher:
     """Configure the moderation-first Telegram dispatcher."""
     dispatcher = Dispatcher()
+    dispatcher.message.outer_middleware(ChatActivityMiddleware())
     dispatcher.message.register(cmd_start, Command("start"))
     dispatcher.message.register(cmd_help, Command("help"))
     dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
+    dispatcher.message.register(user_stats_command, Command("stats"))
     dispatcher.message.register(send_forum_stats, Command("forumstats"))
     dispatcher.message.register(ping_command, lambda message: bool(message.text and message.text.split("@", 1)[0].strip().lower() == "/ping"))
     dispatcher.message.register(cmd_owner, Command("owner"))
@@ -1019,6 +1023,7 @@ async def main() -> None:
             BotCommand(command="help", description="Список команд"),
             BotCommand(command="profile", description="Профиль форума"),
             BotCommand(command="punish", description="Проверить наказание"),
+            BotCommand(command="stats", description="Статистика участника группы"),
             BotCommand(command="forumstats", description="Статистика форума"),
             BotCommand(command="ping", description="Проверить работу бота"),
             BotCommand(command="connect", description="Подключить группу"),
