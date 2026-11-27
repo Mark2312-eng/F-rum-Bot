@@ -74,33 +74,114 @@ def vip_shop_keyboard() -> InlineKeyboardMarkup:
     rows = []
     for tier, details in TIERS.items():
         price = tier_price(tier)
-        if price is not None:
-            rows.append([InlineKeyboardButton(
-                text=f"{details['badge']} {details['name']} · {price} ⭐",
-                callback_data=f"vip:buy:{tier}",
-            )])
+        price_text = f"{price} ⭐" if price is not None else "Скоро"
+        rows.append([InlineKeyboardButton(
+            text=f"{details['badge']} {details['name']} · {price_text}",
+            callback_data=f"vip:detail:{tier}",
+        )])
+    rows.extend([
+        [InlineKeyboardButton(text="📊 Сравнить тарифы", callback_data="vip:page:compare")],
+        [InlineKeyboardButton(text="👤 Мой VIP", callback_data="vip:page:status"),
+         InlineKeyboardButton(text="❔ Помощь", callback_data="vip:page:faq")],
+    ])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_shop_text() -> str:
-    lines = [
-        "⭐ <b>VIP-магазин VISE RUSSIA</b>",
-        "Каждый уровень действует 30 дней после оплаты. Автопродления нет.",
-        "",
-    ]
-    for tier, details in TIERS.items():
-        price = tier_price(tier)
-        price_text = f"{price} ⭐" if price is not None else "пока недоступен"
-        lines.append(f"{details['badge']} <b>{details['name']}</b> — {price_text}")
-        lines.extend(f"  • {escape(perk)}" for perk in details["perks"])
-        lines.append("")
-    if not any(tier_price(tier) is not None for tier in TIERS):
-        lines.append("Покупка временно отключена: владелец ещё не настроил цены.")
-    lines.extend([
-        "VIP даёт только дополнительные функции профиля и не повышает права модерации.",
-        "Оплата производится в Telegram Stars. Покупайте только с разрешения родителя или опекуна.",
+    return (
+        "⭐ <b>VIP-магазин VISE RUSSIA</b>\\n"
+        "<i>Дополнительные возможности оформления профиля.</i>\\n\\n"
+        "Выберите тариф, чтобы посмотреть его привилегии.\\n\\n"
+        "🥈 <b>Silver</b> · 25 ⭐\\n"
+        "🥇 <b>Gold</b> · 50 ⭐\\n"
+        "💎 <b>Diamond</b> · 100 ⭐\\n\\n"
+        "⏳ Каждый тариф действует 30 дней. Без автопродления.\\n"
+        "VIP не даёт прав модерации или администрирования."
+    )
+
+
+def _detail_text(tier: str) -> str:
+    details = TIERS[tier]
+    price = tier_price(tier)
+    price_text = f"{price} ⭐" if price is not None else "Пока недоступен"
+    perks = "\\n".join(f"• {escape(perk)}" for perk in details["perks"])
+    return (
+        f"{details['badge']} <b>{escape(details['name'])}</b>\\n"
+        f"<b>Стоимость:</b> {price_text}\\n"
+        "<b>Срок:</b> 30 дней, единоразовая оплата\\n\\n"
+        "<b>Привилегии:</b>\\n" + perks + "\\n\\n"
+        "Автопродления нет. VIP не повышает роль и не открывает команды модерации."
+    )
+
+
+def _detail_keyboard(tier: str) -> InlineKeyboardMarkup:
+    price = tier_price(tier)
+    button = InlineKeyboardButton(
+        text=f"⭐ Купить за {price} Stars" if price is not None else "Покупка недоступна",
+        callback_data=f"vip:confirm:{tier}" if price is not None else "vip:page:faq",
+    )
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [button],
+        [InlineKeyboardButton(text="⬅️ В магазин", callback_data="vip:page:shop")],
     ])
-    return "\n".join(lines)
+
+
+def _compare_text() -> str:
+    return (
+        "📊 <b>Сравнение VIP-уровней</b>\\n\\n"
+        "🥈 <b>Silver · 25 ⭐</b>\\n"
+        "• VIP-бейдж\\n• /vipprofile и /vipbadge\\n\\n"
+        "🥇 <b>Gold · 50 ⭐</b>\\n"
+        "• Всё из Silver\\n• Персональное имя: /vipname\\n\\n"
+        "💎 <b>Diamond · 100 ⭐</b>\\n"
+        "• Всё из Gold\\n• Персональный титул: /viptitle\\n\\n"
+        "Все тарифы действуют 30 дней без автопродления."
+    )
+
+
+def _faq_text() -> str:
+    return (
+        "❔ <b>Помощь по VIP</b>\\n\\n"
+        "• Оплата проходит через Telegram Stars.\\n"
+        "• Подписка действует 30 дней с момента оплаты.\\n"
+        "• Автопродления и регулярных списаний нет.\\n"
+        "• Продление оформляется вручную новой покупкой.\\n"
+        "• VIP не даёт административных или модераторских прав.\\n\\n"
+        "По вопросам платежа: /paysupport."
+    )
+
+
+def _navigation_keyboard(page: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛍 Магазин", callback_data="vip:page:shop")],
+        [InlineKeyboardButton(text="📊 Сравнить тарифы", callback_data="vip:page:compare")],
+        [InlineKeyboardButton(text="👤 Мой VIP", callback_data="vip:page:status")],
+    ])
+
+
+async def _status_screen(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    membership = await _active_membership(user_id)
+    if membership is None:
+        body = "👤 <b>Мой VIP</b>\\n\\nАктивной подписки нет. Выберите тариф в магазине."
+    else:
+        tier = str(membership["tier"])
+        expiry = membership["expires_at"].astimezone(timezone.utc).strftime("%d.%m.%Y %H:%M UTC")
+        body = (
+            f"👤 <b>Мой VIP</b>\\n\\n{TIERS[tier]['badge']} "
+            f"<b>{escape(TIERS[tier]['name'])}</b>\\n"
+            f"Действует до: <b>{expiry}</b>\\nАвтопродления нет."
+        )
+    return body, _navigation_keyboard("status")
+
+
+async def _edit_vip_screen(callback: CallbackQuery, text: str,
+                           keyboard: InlineKeyboardMarkup) -> None:
+    if callback.message:
+        try:
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=keyboard)
+        except Exception:
+            await callback.message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+    await callback.answer()
 
 
 async def ensure_vip_schema() -> None:
@@ -305,17 +386,55 @@ async def vip_title_command(message: Message) -> None:
     await message.answer("Титул сохранён. Посмотреть карточку: /vipprofile")
 
 
-async def vip_purchase_callback(callback: CallbackQuery) -> None:
-    data = callback.data or ""
-    parts = data.split(":")
-    if len(parts) != 3 or parts[0] != "vip" or parts[1] != "buy" or parts[2] not in TIERS:
-        await callback.answer("Неизвестный тариф.", show_alert=True)
+async def vip_navigation_callback(callback: CallbackQuery) -> None:
+    parts = (callback.data or "").split(":")
+    if len(parts) != 3 or parts[0] != "vip":
+        await callback.answer("Неизвестное действие.", show_alert=True)
         return
-    if not callback.message or callback.message.chat.type != "private":
-        await callback.answer("Покупка доступна только в личном чате.", show_alert=True)
+    action, value = parts[1], parts[2]
+    if action == "page":
+        if value == "shop":
+            await _edit_vip_screen(callback, build_shop_text(), vip_shop_keyboard())
+        elif value == "compare":
+            await _edit_vip_screen(callback, _compare_text(), _navigation_keyboard(value))
+        elif value == "faq":
+            await _edit_vip_screen(callback, _faq_text(), _navigation_keyboard(value))
+        elif value == "status":
+            body, keyboard = await _status_screen(callback.from_user.id)
+            await _edit_vip_screen(callback, body, keyboard)
+        else:
+            await callback.answer("Раздел не найден.", show_alert=True)
         return
-    await callback.answer()
-    await _send_invoice(callback.bot, callback.message.chat.id, callback.from_user.id, parts[2])
+    if action == "detail" and value in TIERS:
+        await _edit_vip_screen(callback, _detail_text(value), _detail_keyboard(value))
+        return
+    if action == "confirm" and value in TIERS:
+        price = tier_price(value)
+        if price is None:
+            await callback.answer("Покупка сейчас недоступна.", show_alert=True)
+            return
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"✅ Подтвердить · {price} ⭐",
+                                  callback_data=f"vip:buy:{value}")],
+            [InlineKeyboardButton(text="↩️ Назад", callback_data=f"vip:detail:{value}")],
+        ])
+        await _edit_vip_screen(
+            callback,
+            f"🧾 <b>Подтверждение покупки</b>\\n\\n"
+            f"{TIERS[value]['badge']} <b>{TIERS[value]['name']}</b>\\n"
+            f"Стоимость: <b>{price} ⭐</b>\\nСрок: <b>30 дней</b>\\n"
+            "Автопродления нет. Нажмите «Подтвердить», чтобы запросить счёт.",
+            keyboard,
+        )
+        return
+    if action == "buy" and value in TIERS:
+        if not callback.message or callback.message.chat.type != "private":
+            await callback.answer("Покупка доступна только в личном чате.", show_alert=True)
+            return
+        await callback.answer()
+        await _send_invoice(callback.bot, callback.message.chat.id, callback.from_user.id, value)
+        return
+    await callback.answer("Неизвестное действие.", show_alert=True)
 
 
 async def vip_pre_checkout(query: PreCheckoutQuery) -> None:
@@ -437,6 +556,6 @@ def register_vip_handlers(dispatcher: Dispatcher) -> None:
     dispatcher.message.register(vip_name_command, Command("vipname"))
     dispatcher.message.register(vip_title_command, Command("viptitle"))
     dispatcher.message.register(pay_support_command, Command("paysupport"))
-    dispatcher.callback_query.register(vip_purchase_callback, F.data.startswith("vip:buy:"))
+    dispatcher.callback_query.register(vip_navigation_callback, F.data.startswith("vip:"))
     dispatcher.pre_checkout_query.register(vip_pre_checkout)
     dispatcher.message.register(vip_successful_payment, F.successful_payment)
