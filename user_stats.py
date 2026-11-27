@@ -66,7 +66,7 @@ def build_user_stats_message(user, stats, role_title: str, blocked: bool) -> str
         f"⚠️ Предупреждений: {warnings}/3\n"
         f"📄 Никнейм: {escape(nickname)}\n"
         f"🚧 Блокировка чата: {status}\n"
-        f"📅 Дата появления в чате: {first_seen}\n\n"
+        f"📅 {date_label}: {first_seen}\n\n"
         "📋 <b>Глобальная информация:</b>\n"
         "💎 VIP статус: нет данных\n"
         f"✍️ Сообщений отправлено: {messages}\n"
