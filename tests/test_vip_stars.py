@@ -16,7 +16,11 @@ class VipStarsConfigurationTests(unittest.TestCase):
     def test_unconfigured_prices_disable_checkout_buttons(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertIsNone(tier_price("silver"))
-            self.assertEqual(vip_shop_keyboard().inline_keyboard, [])
+            self.assertEqual(len(vip_shop_keyboard().inline_keyboard), 3)
+            self.assertEqual(
+                [button.callback_data for row in vip_shop_keyboard().inline_keyboard for button in row],
+                ["vip:page:compare", "vip:page:status", "vip:page:faq"],
+            )
 
     def test_valid_configured_prices_are_read_from_environment(self):
         values = {
@@ -53,7 +57,7 @@ class VipStarsConfigurationTests(unittest.TestCase):
             text = build_shop_text()
         self.assertIn("30 дней", text)
         self.assertIn("Автопродления нет", text)
-        self.assertIn("не настроил цены", text)
+        self.assertIn("временно недоступен", text)
 
     def test_tiers_have_distinct_progressive_perks(self):
         self.assertEqual(set(TIERS), {"silver", "gold", "diamond"})
