@@ -15,6 +15,7 @@ from moderation import (
 from main import (
     acquire_telegram_polling_lock,
     POLLING_ADVISORY_LOCK_ID,
+    _panel_require_owner,
     build_main_keyboard,
     build_section_keyboard,
     build_player_message,
@@ -335,6 +336,28 @@ class PollingLockTests(unittest.IsolatedAsyncioTestCase):
             "SELECT pg_try_advisory_lock($1)", POLLING_ADVISORY_LOCK_ID
         )
         connection.close.assert_not_awaited()
+
+
+class PanelRoleAuthorizationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_role_management_requires_exact_panel_origin(self):
+        from unittest.mock import patch
+
+        request = MagicMock()
+        request.headers = {"Origin": "https://evil.example"}
+        with patch.dict("os.environ", {"PANEL_ORIGIN": "https://f-rum-bot-panel.onrender.com", "OWNER_TELEGRAM_ID": "123"}), \
+             patch("main._panel_user", return_value=123):
+            with self.assertRaises(web.HTTPForbidden):
+                await _panel_require_owner(request)
+
+    async def test_role_management_rejects_non_owner(self):
+        from unittest.mock import patch
+
+        request = MagicMock()
+        request.headers = {"Origin": "https://f-rum-bot-panel.onrender.com"}
+        with patch.dict("os.environ", {"PANEL_ORIGIN": "https://f-rum-bot-panel.onrender.com", "OWNER_TELEGRAM_ID": "123"}), \
+             patch("main._panel_user", return_value=456):
+            with self.assertRaises(web.HTTPForbidden):
+                await _panel_require_owner(request)
 
 
 if __name__ == "__main__":
