@@ -1102,6 +1102,16 @@ class Database:
                 )
         return True
 
+    async def get_chat_command_permissions(self, chat_id: int) -> list[asyncpg.Record]:
+        pool = self._require_pool()
+        return await pool.fetch(
+            """SELECT command_name, min_priority, updated_by, updated_at
+               FROM chat_command_permissions
+               WHERE chat_id = $1
+               ORDER BY command_name""",
+            chat_id,
+        )
+
     async def get_chat_command_priority(self, chat_id: int, command_name: str) -> int | None:
         pool = self._require_pool()
         value = await pool.fetchval(
