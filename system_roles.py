@@ -51,6 +51,18 @@ async def _actor_rank(user_id: int, owner_id: int) -> int:
     return 100 if role == "owner" else ROLES.get(role, {}).get("rank", 0)
 
 
+def role_rank(key: str | None) -> int:
+    """Return the numeric authority of a global system role."""
+    if key == "owner":
+        return 100
+    return int(ROLES.get(key or "", {}).get("rank", 0))
+
+
+def can_manage_rank(actor_rank: int, target_rank: int) -> bool:
+    """A staff member may manage only strictly lower-ranked users."""
+    return actor_rank > target_rank
+
+
 def _role_label(key: str | None) -> str:
     if key == "owner":
         return "Владелец бота"
@@ -190,9 +202,9 @@ async def syshealth_command(message: Message, owner_id: int) -> None:
         db_status = "🔴 PostgreSQL недоступен"
     import os
     await message.answer(
-        "🛠 <b>Техническая диагностика F-rum-Bot</b>\\n"
-        f"{db_status}\\n"
-        "Токен Telegram: " + ("настроен" if os.getenv("TELEGRAM_BOT_TOKEN") else "не настроен") + "\\n"
+        "🛠 <b>Техническая диагностика F-rum-Bot</b>\n"
+        f"{db_status}\n"
+        "Токен Telegram: " + ("настроен" if os.getenv("TELEGRAM_BOT_TOKEN") else "не настроен") + "\n"
         "XenForo API: " + ("настроен" if os.getenv("XF_API_KEY") else "не настроен"),
         parse_mode="HTML",
     )
@@ -218,7 +230,7 @@ async def rolehelp_command(message: Message, owner_id: int) -> None:
         lines.extend(["", "<b>Техника:</b> /syshealth"])
     if role == "owner" or "support" in permissions:
         lines.extend(["", "<b>Поддержка:</b> /reporthelp"])
-    await message.answer("\\n".join(lines), parse_mode="HTML")
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 async def reporthelp_command(message: Message, owner_id: int) -> None:
@@ -226,10 +238,10 @@ async def reporthelp_command(message: Message, owner_id: int) -> None:
         await _deny(message)
         return
     await message.answer(
-        "🎧 <b>Регламент поддержки</b>\\n"
-        "1. Уточните проблему и Telegram ID пользователя.\\n"
-        "2. Не запрашивайте пароли, коды входа или токены.\\n"
-        "3. Для нарушений используйте /report в подключённой группе.\\n"
+        "🎧 <b>Регламент поддержки</b>\n"
+        "1. Уточните проблему и Telegram ID пользователя.\n"
+        "2. Не запрашивайте пароли, коды входа или токены.\n"
+        "3. Для нарушений используйте /report в подключённой группе.\n"
         "4. Передайте техническую неисправность разработчику.",
         parse_mode="HTML",
     )
