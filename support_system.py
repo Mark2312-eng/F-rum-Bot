@@ -173,6 +173,8 @@ async def support_me(request: web.Request) -> web.Response:
 
 
 async def support_logout(request: web.Request) -> web.Response:
+    if not _origin_allowed(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
     response = web.json_response({"ok": True})
     response.del_cookie("support_session", path="/", secure=True, httponly=True, samesite="None")
     return _cors(request, response)
@@ -194,6 +196,8 @@ async def support_list(request: web.Request) -> web.Response:
 
 
 async def support_create(request: web.Request) -> web.Response:
+    if not _origin_allowed(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
     user_id = _session_user(request)
     if user_id is None:
         return _cors(request, web.json_response({"error": "Требуется вход через Telegram."}, status=401))
@@ -246,6 +250,8 @@ async def support_thread(request: web.Request) -> web.Response:
 
 
 async def support_reply(request: web.Request) -> web.Response:
+    if not _origin_allowed(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
     user_id = _session_user(request)
     if user_id is None:
         return _cors(request, web.json_response({"error": "Требуется вход через Telegram."}, status=401))
@@ -314,6 +320,8 @@ async def staff_ticket_thread(request: web.Request) -> web.Response:
 
 
 async def staff_ticket_reply(request: web.Request) -> web.Response:
+    if not _origin_allowed(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
     user_id = _admin_session(request)
     owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
     if user_id is None or not await has_permission(user_id, owner_id, "support"):
@@ -332,6 +340,8 @@ async def staff_ticket_reply(request: web.Request) -> web.Response:
             ticket = await conn.fetchrow("SELECT user_id,status FROM support_tickets WHERE id=$1 FOR UPDATE", ticket_id)
             if not ticket:
                 return _cors(request, web.json_response({"error": "Обращение не найдено."}, status=404))
+            if ticket["status"] == "closed":
+                return _cors(request, web.json_response({"error": "Обращение закрыто."}, status=409))
             await conn.execute("INSERT INTO support_messages(ticket_id,author_id,author_role,body) VALUES($1,$2,'staff',$3)", ticket_id, user_id, body)
             await conn.execute("UPDATE support_tickets SET status='waiting_user',assigned_to=COALESCE(assigned_to,$2),updated_at=NOW() WHERE id=$1", ticket_id, user_id)
     try:
@@ -342,6 +352,8 @@ async def staff_ticket_reply(request: web.Request) -> web.Response:
 
 
 async def staff_ticket_assign(request: web.Request) -> web.Response:
+    if not _origin_allowed(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
     user_id = _admin_session(request)
     owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
     if user_id is None or not await has_permission(user_id, owner_id, "support"):
@@ -356,6 +368,8 @@ async def staff_ticket_assign(request: web.Request) -> web.Response:
 
 
 async def staff_ticket_close(request: web.Request) -> web.Response:
+    if not _origin_allowed(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
     user_id = _admin_session(request)
     owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
     if user_id is None or not await has_permission(user_id, owner_id, "support"):
