@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from html import escape
 from urllib.parse import urljoin, urlsplit
@@ -27,7 +28,43 @@ load_dotenv()
 LOGGER = logging.getLogger(__name__)
 DEFAULT_PORT = 10000
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15, connect=5, sock_read=10)
-PENDING_INPUTS: dict[int, str] = {}
+PENDING_INPUTS: dict[tuple[int, int], tuple[str, float]] = {}
+PENDING_INPUT_TTL_SECONDS = 300
+
+
+def set_pending_input(chat_id: int, user_id: int, action: str) -> None:
+    """Store a one-time input request scoped to its chat and user."""
+    now = time.monotonic()
+    expired = [
+        key for key, (_action, expires_at) in PENDING_INPUTS.items()
+        if expires_at <= now
+    ]
+    for key in expired:
+        PENDING_INPUTS.pop(key, None)
+    PENDING_INPUTS[(chat_id, user_id)] = (
+        action,
+        now + PENDING_INPUT_TTL_SECONDS,
+    )
+
+
+def pop_pending_input(chat_id: int, user_id: int) -> str | None:
+    """Consume a pending input once, rejecting expired or cross-chat state."""
+    pending = PENDING_INPUTS.pop((chat_id, user_id), None)
+    if pending is None:
+        return None
+    action, expires_at = pending
+    return action if expires_at > time.monotonic() else None
+
+
+def has_pending_input(chat_id: int, user_id: int) -> bool:
+    """Check whether this user has an unexpired request in this chat."""
+    pending = PENDING_INPUTS.get((chat_id, user_id))
+    if pending is None:
+        return False
+    if pending[1] <= time.monotonic():
+        PENDING_INPUTS.pop((chat_id, user_id), None)
+        return False
+    return True
 
 
 def get_port(value: str | None = None) -> int:
@@ -363,70 +400,78 @@ async def cmd_start(message: Message) -> None:
         return
 
     await message.answer(
-        "👋 <b>VISE RUSSIA | MOSCOW</b>\n\n"
-        "Бот управления и модерации Telegram-групп.\n\n"
-        "Добавьте бота в группу и выдайте права администратора.\n"
-        "Профили форума, проверка наказаний и инструменты модерации доступны через кнопки.\n"
-        "Команды: /help.",
+        "👋 <b>VISE RUSSIA — помощник сообщества</b>\n\n"
+        "Единый центр инструментов для форума и Telegram-групп.\n\n"
+        "<b>Что умеет бот</b>\n"
+        "👤 Находит профили участников на XenForo\n"
+        "🛡 Помогает команде модерировать подключённые группы\n"
+        "📨 Принимает жалобы и ведёт журнал действий\n"
+        "🎓 Поддерживает тестирование и систему локальных ролей\n\n"
+        "<b>Начало работы</b>\n"
+        "Добавьте бота в группу, выдайте необходимые права администратора, "
+        "а затем подключите группу командой /connect от владельца бота.\n\n"
+        "📖 Полный список возможностей: /help",
         parse_mode="HTML",
         reply_markup=build_main_keyboard(forum_url, is_owner=bool(message.from_user and message.from_user.id == int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0"))),
     )
 
 
 async def cmd_help(message: Message) -> None:
-    """List supported forum and moderation commands."""
+    """Show a structured guide to public, moderation, role and test commands."""
     await message.answer(
-        "🛡 <b>F-rum-Bot — команды</b>\n\n"
-        "<b>Форум:</b>\n"
-        "/profile НИК — профиль XenForo\n"
-        "/punish НИК — статус наказания\n"
+        "🛡 <b>F-rum-Bot — справочник команд</b>\n"
+        "<i>Инструменты форума и модерации VISE RUSSIA</i>\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "👤 <b>Форум</b>\n"
+        "/profile НИК — открыть профиль участника\n"
+        "/punish НИК — проверить статус наказания\n"
         "/stats — статистика форума\n\n"
-        "<b>Модерация группы:</b>\n"
-        "/warn ID — предупреждение\n"
+        "🛡 <b>Модерация группы</b>\n"
+        "/warn ID — выдать предупреждение\n"
         "/warns ID — посмотреть предупреждения\n"
         "/clearwarns ID — сбросить предупреждения\n"
-        "/mute ID — мут на 10 минут\n"
-        "/unmute ID — снять мут\n"
-        "/ban ID и /unban ID — блокировка и снятие блокировки\n"
+        "/mute ID — ограничить на 10 минут\n"
+        "/unmute ID — снять ограничение\n"
+        "/ban ID · /unban ID — блокировка и разблокировка\n"
         "/kick ID — исключить участника\n"
         "/purge N — удалить последние 1–100 сообщений\n"
-        "/modstats — статистика модерации за 7 дней\n"
-        "/settings — настройки антифлуда и ссылок\n"
-        "/modlog — журнал модерации\n"
-        "/report причина — пожаловаться на сообщение (ответом)\n"
+        "/modstats — статистика за 7 дней\n"
+        "/modlog — журнал действий\n\n"
+        "⚙️ <b>Настройки и обращения</b>\n"
+        "/settings — антифлуд и политика ссылок\n"
+        "/report ПРИЧИНА — пожаловаться (ответом на сообщение)\n"
         "/reports — очередь жалоб\n"
         "/reportclose ID — закрыть жалобу\n"
-        "/blacklist add/del/list — общий чёрный список\n"
-        "/nick set Имя или /nick ID — никнеймы группы\n"
-        "/role add/del/list — дополнительные модераторы\n"
-        "/myrole — моя системная должность\n"
-        "/staff — состав системной команды\n"
-        "/staffinfo ID — карточка сотрудника\n"
-        "/setrole ID КЛЮЧ — назначить системную должность\n"
-        "/staffremove ID — снять системную должность\n"
-        "/stafflog — журнал назначений\n"
-        "/rolehelp — справка по должностям\n"
-        "/syshealth — техническая диагностика (тех. роли)\n"
-        "/reporthelp — регламент поддержки\n"
-        "/createtest — создать тест (сотрудники 80+)\n"
+        "/blacklist add ID ПРИЧИНА — добавить в общий список\n"
+        "/blacklist del ID · /blacklist list — удалить или посмотреть\n"
+        "/nick set ИМЯ — установить ник ответом на сообщение\n"
+        "/nick ID — посмотреть ник участника\n\n"
+        "👥 <b>Роли и права группы</b>\n"
+        "/roles — список ролей и приоритетов\n"
+        "/newrole НАЗВАНИЕ ПРИОРИТЕТ — создать роль (80+)\n"
+        "/delrole КЛЮЧ — удалить неиспользуемую роль\n"
+        "/chatrole ID КЛЮЧ — назначить роль\n"
+        "/removerole ID — снять роль\n"
+        "/editcmd КОМАНДА ПРИОРИТЕТ — настроить доступ (80+)\n"
+        "/gm ID on|off — иммунитет участника (80+)\n"
+        "/role add ID · /role del ID · /role list — управление модераторами\n\n"
+        "🎓 <b>Тестирование и команда</b>\n"
+        "/createtest — создать тест (системный приоритет 80+)\n"
         "/testadd — добавить вопрос\n"
-        "/sendtest ID ТЕСТА — выдать тест\n"
-        "/testresults ID — результаты теста\n"
-        "/roles — роли этой группы и приоритеты\n"
-        "/newrole Название Приоритет — создать роль (80+)\n"
-        "/delrole КЛЮЧ — удалить пустую пользовательскую роль\n"
-        "/chatrole ID КЛЮЧ — назначить роль участнику\n"
-        "/removerole ID — снять роль участника\n"
-        "/editcmd КОМАНДА ПРИОРИТЕТ — изменить порог (80+)\n"
-        "/gm ID on|off — иммунитет (80+)\n"
-        "!newrole, !delrole, !roles, !setrole, !removerole, !editcmd, !gm — короткие варианты\n"
-        "!warn, !mute, !unmute, !ban, !unban, !kick, !purge — короткие команды модерации\n"
-        "/connect — подключить группу (владелец бота).\n\n"
-        "Команды модерации доступны владельцу и администраторам подключённой группы. "
-        "Боту нужны права администратора.",
+        "/sendtest ID ТЕСТА — отправить приглашение\n"
+        "/testresults ID — посмотреть результаты\n"
+        "/myrole · /staff · /staffinfo ID — информация о команде\n"
+        "/setrole ID КЛЮЧ · /staffremove ID — управление должностями\n"
+        "/stafflog · /rolehelp — журнал и справка\n"
+        "/syshealth — диагностика (технические роли)\n"
+        "/reporthelp — регламент поддержки\n\n"
+        "🔗 <b>Подключение</b>\n"
+        "/connect — подключить текущую группу (только владелец бота)\n\n"
+        "<i>Команды модерации работают в подключённых группах. "
+        "Для действий с участниками бот должен иметь соответствующие права Telegram. "
+        "Доступ к командам определяется ролью, приоритетом и настройками группы.</i>",
         parse_mode="HTML",
     )
-
 
 async def cmd_menu_callback(callback: CallbackQuery) -> None:
     """Handle moderation menu navigation and owner actions."""
@@ -447,7 +492,7 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
     if data.startswith("menu:"):
         section = data.split(":", 1)[1]
         if section in {"profile", "punish"}:
-            PENDING_INPUTS[callback.from_user.id] = section
+            set_pending_input(message.chat.id, callback.from_user.id, section)
             prompt = "Отправьте ник пользователя форума для поиска профиля." if section == "profile" else "Отправьте ник пользователя форума для проверки наказания."
             await message.answer(prompt)
         elif section == "stats":
@@ -476,7 +521,7 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
                     reply_markup=build_owner_keyboard(),
                 )
             else:
-                PENDING_INPUTS[callback.from_user.id] = f"mod_{action}"
+                set_pending_input(message.chat.id, callback.from_user.id, f"mod_{action}")
                 await message.answer(
                     "Отправьте Telegram ID участника или ответьте на его сообщение.",
                     reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
@@ -506,7 +551,7 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
         return
 
     if data == "input:cancel":
-        PENDING_INPUTS.pop(callback.from_user.id, None)
+        PENDING_INPUTS.pop((message.chat.id, callback.from_user.id), None)
         await message.answer("Ввод отменён.")
 
 
@@ -705,7 +750,7 @@ async def button_input_handler(message: Message) -> None:
     """Consume requested forum lookup or moderation target input."""
     if not message.from_user or not message.text:
         return
-    action = PENDING_INPUTS.pop(message.from_user.id, None)
+    action = pop_pending_input(message.chat.id, message.from_user.id)
     if not action:
         return
     if action in {"profile", "punish"}:
@@ -917,7 +962,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(chat_setrole_handler, lambda message: bool(message.text and message.text.startswith("+role ")))
     dispatcher.message.register(chat_removerole_handler, lambda message: bool(message.text and message.text.startswith("-role ")))
     dispatcher.callback_query.register(test_answer_callback, F.data.startswith("testq:"))
-    dispatcher.message.register(button_input_handler, lambda message: bool(message.from_user and message.from_user.id in PENDING_INPUTS))
+    dispatcher.message.register(button_input_handler, lambda message: bool(message.from_user and has_pending_input(message.chat.id, message.from_user.id)))
     dispatcher.message.register(group_moderation_handler)
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
     dispatcher.callback_query.register(cmd_menu_callback, F.data.startswith("menu:"))
