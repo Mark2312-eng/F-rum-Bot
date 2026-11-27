@@ -1,8 +1,89 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="F-rum-Bot — инструменты модерации Telegram-групп и интеграция с XenForo для VISE RUSSIA."><title>F-rum-Bot — VISE RUSSIA</title><link rel="stylesheet" href="style.css"></head>
-<body><header class="top"><a class="brand" href="#">F-rum<span>-Bot</span></a><nav><a href="#features">Возможности</a><a href="#commands">Команды</a><a href="#roles">Роли и тесты</a><a class="nav-button" href="https://t.me/ViseRussiaHelpForumBot" target="_blank" rel="noopener">Telegram</a></nav></header>
-<main><section class="hero"><p class="eyebrow">VISE RUSSIA · TELEGRAM TOOLS</p><h1>Порядок в сообществе.<br><em>Управление без хаоса.</em></h1><p class="lead">F-rum-Bot объединяет инструменты модерации Telegram-групп, интеграцию с XenForo, систему ролей и тестирование кандидатов.</p><div class="actions"><a class="button" href="https://github.com/Mark2312-eng/F-rum-Bot" target="_blank" rel="noopener">Исходный код <span>↗</span></a><a class="text-link" href="#features">Изучить возможности ↓</a></div><div class="hero-note"><span class="dot"></span> Python · aiogram · PostgreSQL</div></section>
-<section id="features" class="section"><p class="eyebrow">01 / ВОЗМОЖНОСТИ</p><h2>Инструменты для ежедневной работы</h2><div class="cards"><article><b>01</b><h3>Модерация</h3><p>Предупреждения, ограничения, блокировки, очистка сообщений, жалобы и журнал действий.</p></article><article><b>02</b><h3>Интеграция с форумом</h3><p>Поиск профилей XenForo и проверка статуса наказаний участников.</p></article><article><b>03</b><h3>Статистика</h3><p>Статистика модерации, активности участников и подключённых групп.</p></article></div></section>
-<section id="roles" class="section dark"><p class="eyebrow">02 / РОЛИ И ОБУЧЕНИЕ</p><h2>Права доступа и проверка знаний</h2><div class="split"><p>Для каждой подключённой группы можно использовать собственную иерархию ролей. Уровень доступа проверяется при выполнении команд.</p><p>Система тестирования позволяет создавать вопросы, отправлять приглашения в личные сообщения, проверять результат и назначать подходящую локальную роль при успешной сдаче.</p></div><div class="pills"><span>Роли групп</span><span>Приоритеты доступа</span><span>Тесты</span><span>Журнал изменений</span></div></section>
-<section id="commands" class="section"><p class="eyebrow">03 / КОМАНДЫ</p><h2>Основные команды</h2><div class="command-grid"><div><code>/help</code><span>Справочник команд</span></div><div><code>/connect</code><span>Подключить группу</span></div><div><code>/settings</code><span>Настройки модерации</span></div><div><code>/modlog</code><span>Журнал действий</span></div><div><code>/roles</code><span>Роли группы</span></div><div><code>/createtest</code><span>Создать тест</span></div><div><code>/sendtest</code><span>Выдать приглашение</span></div><div><code>/testresults</code><span>Результаты теста</span></div></div><p class="muted">Доступность отдельных команд зависит от типа чата и прав пользователя.</p></section>
-<section class="footer-cta"><p class="eyebrow">ОТКРЫТЫЙ ПРОЕКТ</p><h2>F-rum-Bot</h2><p>Исходный код и история изменений доступны на GitHub.</p><a class="button" href="https://github.com/Mark2312-eng/F-rum-Bot" target="_blank" rel="noopener">Открыть GitHub ↗</a></section></main><footer><span>© F-rum-Bot · VISE RUSSIA</span><span>Сайт носит информационный характер</span></footer></body></html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080d18">
+  <meta name="description" content="F-rum-Bot — система управления Telegram-сообществом VISE RUSSIA: модерация, роли, тестирование и интеграция с XenForo.">
+  <title>F-rum-Bot — управление сообществом VISE RUSSIA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#" aria-label="F-rum-Bot — главная"><span class="brand-mark">F</span><span>F-rum<span class="brand-accent">-Bot</span><small>VISE RUSSIA COMMUNITY TOOLS</small></span></a>
+    <nav class="desktop-nav" aria-label="Основная навигация">
+      <a href="#features">Возможности</a><a href="#workflow">Как работает</a><a href="#commands">Команды</a>
+    </nav>
+    <a class="header-cta" href="https://t.me/ViseRussiaHelpForumBot" target="_blank" rel="noopener">Открыть бота <span>↗</span></a>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <div class="status"><span class="status-dot"></span> ИНСТРУМЕНТЫ СООБЩЕСТВА VISE RUSSIA</div>
+        <h1>Управление<br>сообществом —<br><span>под контролем.</span></h1>
+        <p class="hero-lead">Единая система для модерации Telegram-групп, управления доступами и проверки знаний команды. Меньше рутины — больше порядка.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="https://t.me/ViseRussiaHelpForumBot" target="_blank" rel="noopener">Перейти к боту <span>↗</span></a>
+          <a class="button button-ghost" href="#features">Изучить возможности <span>↓</span></a>
+        </div>
+        <div class="hero-meta"><span>PYTHON</span><i></i><span>TELEGRAM</span><i></i><span>POSTGRESQL</span></div>
+      </div>
+      <div class="hero-visual" aria-label="Схема инструментов F-rum-Bot">
+        <div class="visual-orbit orbit-one"></div><div class="visual-orbit orbit-two"></div>
+        <div class="visual-core"><span class="core-symbol">F</span><strong>F-rum-Bot</strong><small>COMMUNITY SYSTEM</small></div>
+        <div class="float-card float-top"><span class="mini-icon">⌘</span><span><b>Модерация</b><small>Контроль действий</small></span><em>01</em></div>
+        <div class="float-card float-right"><span class="mini-icon">◇</span><span><b>Роли</b><small>Уровни доступа</small></span><em>02</em></div>
+        <div class="float-card float-bottom"><span class="mini-icon">✓</span><span><b>Тестирование</b><small>Проверка знаний</small></span><em>03</em></div>
+        <div class="visual-caption">ONE COMMUNITY · ONE CONTROL CENTER</div>
+      </div>
+      <div class="hero-index"><span>01</span><span class="index-line"></span><span>СИСТЕМА УПРАВЛЕНИЯ</span></div>
+    </section>
+
+    <section class="trust-strip" aria-label="Основные направления">
+      <span>01 / МОДЕРАЦИЯ</span><span>02 / ИНТЕГРАЦИЯ XENFORO</span><span>03 / УПРАВЛЕНИЕ РОЛЯМИ</span><span>04 / ТЕСТИРОВАНИЕ</span>
+    </section>
+
+    <section id="features" class="section features-section">
+      <div class="section-heading"><div><p class="eyebrow">ВОЗМОЖНОСТИ / 01</p><h2>Всё необходимое.<br><span>В одном инструменте.</span></h2></div><p class="section-intro">Функции для ежедневной работы администрации и поддержания порядка в Telegram-сообществе.</p></div>
+      <div class="feature-grid">
+        <article class="feature-card feature-large"><div class="card-top"><span class="feature-number">01</span><span class="feature-icon">⌁</span></div><h3>Модерация</h3><p>Инструменты для контроля чата и обработки нарушений: предупреждения, ограничения, блокировки, очистка сообщений и журнал действий.</p><div class="tag-row"><span>Наказания</span><span>Журнал</span><span>Жалобы</span></div></article>
+        <article class="feature-card"><div class="card-top"><span class="feature-number">02</span><span class="feature-icon">◎</span></div><h3>Связь с форумом</h3><p>Поиск профилей XenForo и проверка статуса наказаний участников.</p><div class="card-link">XENFORO INTEGRATION <span>↗</span></div></article>
+        <article class="feature-card"><div class="card-top"><span class="feature-number">03</span><span class="feature-icon">◇</span></div><h3>Система ролей</h3><p>Отдельные уровни доступа для каждой подключённой группы и контроль прав при выполнении команд.</p><div class="card-link">GROUP PERMISSIONS <span>↗</span></div></article>
+        <article class="feature-card"><div class="card-top"><span class="feature-number">04</span><span class="feature-icon">✓</span></div><h3>Тестирование команды</h3><p>Создание тестов, приглашения участникам, проверка результатов и назначение локальной роли при успешной сдаче.</p><div class="card-link">TEAM ASSESSMENT <span>↗</span></div></article>
+        <article class="feature-card"><div class="card-top"><span class="feature-number">05</span><span class="feature-icon">▥</span></div><h3>Статистика</h3><p>Сводная информация о работе модерации, активности участников и подключённых группах.</p><div class="card-link">ACTIVITY OVERVIEW <span>↗</span></div></article>
+      </div>
+    </section>
+
+    <section id="workflow" class="workflow-section">
+      <div class="workflow-inner"><div><p class="eyebrow">ПРОСТОЙ ПРОЦЕСС / 02</p><h2>От подключения<br>до контроля.</h2><p class="workflow-lead">Основные инструменты доступны через Telegram. Настройте группу, распределите права и используйте нужные команды.</p><a class="button button-primary" href="https://t.me/ViseRussiaHelpForumBot" target="_blank" rel="noopener">Начать работу <span>↗</span></a></div>
+        <div class="steps">
+          <article><span>01</span><div><h3>Подключите группу</h3><p>Добавьте бота в Telegram-группу и выполните настройку.</p></div><b>→</b></article>
+          <article><span>02</span><div><h3>Настройте доступы</h3><p>Определите роли и разрешения для участников команды.</p></div><b>→</b></article>
+          <article><span>03</span><div><h3>Работайте с инструментами</h3><p>Используйте модерацию, тесты и статистику в повседневной работе.</p></div><b>✓</b></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="commands" class="section commands-section">
+      <div class="section-heading"><div><p class="eyebrow">БЫСТРЫЙ СПРАВОЧНИК / 03</p><h2>Основные <span>команды.</span></h2></div><p class="section-intro">Краткий список команд для начала работы. Доступность зависит от прав пользователя и типа чата.</p></div>
+      <div class="command-list">
+        <div><code>/help</code><span>Справочник доступных команд</span><small>ОСНОВНОЕ</small></div>
+        <div><code>/connect</code><span>Подключение Telegram-группы</span><small>НАСТРОЙКА</small></div>
+        <div><code>/settings</code><span>Настройки модерации</span><small>НАСТРОЙКА</small></div>
+        <div><code>/modlog</code><span>Журнал действий модерации</span><small>МОДЕРАЦИЯ</small></div>
+        <div><code>/roles</code><span>Управление ролями группы</span><small>ДОСТУПЫ</small></div>
+        <div><code>/createtest</code><span>Создание теста</span><small>ТЕСТЫ</small></div>
+        <div><code>/sendtest</code><span>Отправка приглашения на тест</span><small>ТЕСТЫ</small></div>
+        <div><code>/testresults</code><span>Просмотр результатов тестирования</span><small>ТЕСТЫ</small></div>
+      </div>
+    </section>
+
+    <section class="closing-cta"><p class="eyebrow">VISE RUSSIA / COMMUNITY TOOLS</p><h2>Порядок начинается<br><span>с правильных инструментов.</span></h2><p>Откройте бота и изучите доступные команды.</p><a class="button button-primary" href="https://t.me/ViseRussiaHelpForumBot" target="_blank" rel="noopener">Открыть F-rum-Bot <span>↗</span></a></section>
+  </main>
+  <footer><a class="brand footer-brand" href="#"><span class="brand-mark">F</span><span>F-rum<span class="brand-accent">-Bot</span><small>VISE RUSSIA COMMUNITY TOOLS</small></span></a><span>© F-rum-Bot · VISE RUSSIA</span><a href="https://github.com/Mark2312-eng/F-rum-Bot" target="_blank" rel="noopener">Исходный код на GitHub ↗</a></footer>
+</body>
+</html>
