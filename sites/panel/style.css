@@ -161,3 +161,5 @@ tbody tr:hover{background:#18251d}
 .member-history-filters label{display:grid;gap:6px;color:#89978d;font-size:11px}
 .member-history-filters select,.member-history-filters input{width:100%;min-height:39px;padding:8px 10px;border:1px solid var(--line,#29342e);border-radius:8px;background:var(--surface,#111a15);color:inherit;font:inherit}
 @media(max-width:600px){.member-history-filters{grid-template-columns:1fr}.member-history-filters .button{width:100%}}
+
+.staff-admin-controls{display:grid;grid-template-columns:minmax(180px,.7fr) minmax(240px,1.3fr) auto;gap:12px;align-items:end;margin:18px 0;padding:16px;background:#0e1713;border:1px solid #26372d;border-radius:12px}.staff-admin-controls input,.staff-admin-controls select{display:block;width:100%;margin-top:7px;padding:11px 12px;background:#0a110e;border:1px solid #34463a;border-radius:8px;color:var(--text);font:inherit}.staff-admin-controls .button{min-height:40px}.staff-admin-controls[hidden]{display:none}@media(max-width:700px){.staff-admin-controls{grid-template-columns:1fr}.staff-admin-controls .button{width:100%}}
