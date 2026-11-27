@@ -23,6 +23,7 @@ from system_roles import staff_command, myrole_command, staffinfo_command, setro
 from testing import create_test_command, add_question_command, send_test_command, test_results_command, handle_test_start, test_answer_callback
 from chat_roles import roles_command, newrole_command, delrole_command, set_chat_role_command, remove_chat_role_command, editcmd_command, gm_command
 from user_stats import ChatActivityMiddleware, user_stats_command
+from group_info import admins_command, chatinfo_command, rules_command, setrules_command
 
 load_dotenv()
 
@@ -463,6 +464,10 @@ async def cmd_help(message: Message) -> None:
         "/purge N — удалить последние 1–100 сообщений\n"
         "/modstats — статистика за 7 дней\n"
         "/modlog — журнал действий\n\n"
+        "/admins — список администраторов группы\\n"
+        "/chatinfo — информация о группе\\n"
+        "/rules — правила группы\\n"
+        "/setrules ТЕКСТ — установить правила (для администраторов)\\n"
         "⚙️ <b>Настройки и обращения</b>\n"
         "/settings — антифлуд и политика ссылок\n"
         "/report ПРИЧИНА — пожаловаться (ответом на сообщение)\n"
@@ -784,6 +789,23 @@ async def group_baninfo_handler(message: Message, bot: Bot) -> None:
         await show_ban_info(message, bot, owner_id)
 
 
+async def group_admins_handler(message: Message, bot: Bot) -> None:
+    await admins_command(message, bot)
+
+
+async def group_chatinfo_handler(message: Message, bot: Bot) -> None:
+    await chatinfo_command(message, bot)
+
+
+async def group_rules_handler(message: Message) -> None:
+    await rules_command(message)
+
+
+async def group_setrules_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    await setrules_command(message, bot, owner_id)
+
+
 async def group_clearwarns_handler(message: Message, bot: Bot) -> None:
     owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
     if owner_id > 0:
@@ -971,6 +993,14 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(group_warnlist_handler, Command("warnlist"))
     dispatcher.message.register(group_banlist_handler, Command("banlist"))
     dispatcher.message.register(group_baninfo_handler, Command("baninfo"))
+    dispatcher.message.register(group_admins_handler, Command("admins"))
+    dispatcher.message.register(group_chatinfo_handler, Command("chatinfo"))
+    dispatcher.message.register(group_rules_handler, Command("rules"))
+    dispatcher.message.register(group_setrules_handler, Command("setrules"))
+    dispatcher.message.register(group_admins_handler, lambda message: bool(message.text and message.text.lower().strip() == "!admins"))
+    dispatcher.message.register(group_chatinfo_handler, lambda message: bool(message.text and message.text.lower().strip() == "!chatinfo"))
+    dispatcher.message.register(group_rules_handler, lambda message: bool(message.text and message.text.lower().strip() == "!rules"))
+    dispatcher.message.register(group_setrules_handler, lambda message: bool(message.text and message.text.lower().startswith("!setrules ")))
     dispatcher.message.register(group_warnhistory_handler, lambda message: bool(message.text and message.text.lower().startswith("!warnhistory")))
     dispatcher.message.register(group_warnlist_handler, lambda message: bool(message.text and message.text.lower().strip() == "!warnlist"))
     dispatcher.message.register(group_banlist_handler, lambda message: bool(message.text and message.text.lower().strip() == "!banlist"))
@@ -1098,6 +1128,10 @@ async def main() -> None:
             BotCommand(command="warnlist", description="Список с предупреждениями"),
             BotCommand(command="banlist", description="Список блокировок из журнала"),
             BotCommand(command="baninfo", description="Информация о блокировке"),
+            BotCommand(command="admins", description="Администраторы группы"),
+            BotCommand(command="chatinfo", description="Информация о группе"),
+            BotCommand(command="rules", description="Правила группы"),
+            BotCommand(command="setrules", description="Установить правила группы"),
             BotCommand(command="clearwarns", description="Сбросить предупреждения"),
             BotCommand(command="mute", description="Ограничить на 10 минут"),
             BotCommand(command="unmute", description="Снять ограничение"),
