@@ -76,6 +76,7 @@ class VipStarsConfigurationTests(unittest.TestCase):
         self.assertIn("Silver · 31 ⭐", text)
         self.assertIn("Gold · 62 ⭐", text)
         self.assertIn("Diamond · 124 ⭐", text)
+        self.assertNotIn("\\n", text)
 
     def test_comparison_marks_unconfigured_prices_unavailable(self):
         with patch.dict(os.environ, {}, clear=True):
