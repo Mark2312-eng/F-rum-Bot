@@ -56,6 +56,13 @@ class TelegramLoginTests(unittest.TestCase):
         request = SimpleNamespace(cookies={"support_session": token})
         self.assertEqual(_session_user(request), 987654321)
 
+    def test_application_roles_map_to_existing_system_roles(self):
+        from support_system import _staff_system_role_for_application
+        self.assertEqual(_staff_system_role_for_application("helper"), "trainee")
+        self.assertEqual(_staff_system_role_for_application("moderator"), "moderator")
+        self.assertEqual(_staff_system_role_for_application("support"), "support")
+        self.assertIsNone(_staff_system_role_for_application("director"))
+
     def test_staff_application_roles_are_limited_to_non_privileged_roles(self):
         self.assertEqual(STAFF_APPLICATION_ROLES, {"helper", "moderator", "support"})
 
