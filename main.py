@@ -666,6 +666,17 @@ async def panel_member_history(request: web.Request) -> web.Response:
     if not await database.is_chat_registered(chat_id):
         raise web.HTTPNotFound(text="Группа не найдена.")
 
+    category = request.query.get("category", "").strip().lower() or None
+    if category not in (None, "moderation", "roles"):
+        raise web.HTTPBadRequest(text="Некорректный тип события.")
+    actor_raw = request.query.get("actor_id", "").strip()
+    try:
+        actor_id_filter = int(actor_raw) if actor_raw else None
+    except ValueError:
+        raise web.HTTPBadRequest(text="Некорректный ID модератора.")
+    if actor_id_filter is not None and actor_id_filter <= 0:
+        raise web.HTTPBadRequest(text="Некорректный ID модератора.")
+
     pool = database._require_pool()
     member = await pool.fetchrow(
         """SELECT a.chat_id, COALESCE(c.title, '') AS chat_title,
@@ -686,17 +697,6 @@ async def panel_member_history(request: web.Request) -> web.Response:
     )
     if member is None:
         raise web.HTTPNotFound(text="Участник не найден в этой группе.")
-
-    category = request.query.get("category", "").strip().lower() or None
-    if category not in (None, "moderation", "roles"):
-        raise web.HTTPBadRequest(text="Некорректный тип события.")
-    actor_raw = request.query.get("actor_id", "").strip()
-    try:
-        actor_id_filter = int(actor_raw) if actor_raw else None
-    except ValueError:
-        raise web.HTTPBadRequest(text="Некорректный ID модератора.")
-    if actor_id_filter is not None and actor_id_filter <= 0:
-        raise web.HTTPBadRequest(text="Некорректный ID модератора.")
 
     events = await pool.fetch(
         """SELECT actor_id, action, details, created_at, category
