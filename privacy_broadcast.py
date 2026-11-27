@@ -223,7 +223,8 @@ class ConsentGateMiddleware(BaseMiddleware):
 
         text = getattr(event, "text", None) or ""
         callback_data = getattr(event, "data", None) or ""
-        allowed_message = text.split(maxsplit=1)[0].split("@", 1)[0] in {
+        command = text.split(maxsplit=1)[0].split("@", 1)[0] if text.strip() else ""
+        allowed_message = command in {
             "/start", "/stop", "/withdraw_consent"
         }
         allowed_callback = callback_data.startswith(("consent:", "subscription:"))
