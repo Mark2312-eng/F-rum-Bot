@@ -160,13 +160,6 @@ async def _active_membership(user_id: int):
     )
 
 
-async def _issue_invoice(message: Message, tier: str) -> None:
-    if message.chat.type != "private" or not message.from_user:
-        await message.answer("Оформить VIP можно только в личном чате с ботом.")
-        return
-    await _send_invoice(message.bot, message.chat.id, message.from_user.id, tier)
-
-
 async def _send_invoice(bot: Bot, chat_id: int, user_id: int, tier: str) -> None:
     amount = tier_price(tier)
     if amount is None:
@@ -355,7 +348,10 @@ async def vip_successful_payment(message: Message) -> None:
     if payment.currency != "XTR":
         await message.answer("Платёж не прошёл проверку валюты. Обратитесь в поддержку: /support")
         return
+
     pool = database._require_pool()
+    activated_tier = None
+    invalid_payment = False
     async with pool.acquire() as connection:
         async with connection.transaction():
             already_processed = await connection.fetchval(
@@ -364,6 +360,7 @@ async def vip_successful_payment(message: Message) -> None:
             )
             if already_processed:
                 return
+
             intent = await connection.fetchrow(
                 """SELECT user_id, tier, amount, status
                    FROM bot_vip_invoice_intents WHERE payload = $1 FOR UPDATE""",
@@ -376,44 +373,52 @@ async def vip_successful_payment(message: Message) -> None:
                 or int(intent["amount"]) != payment.total_amount
                 or intent["tier"] not in TIERS
             ):
+                invalid_payment = True
                 LOGGER.error("VIP payment could not be matched to a pending invoice")
-                await message.answer("Не удалось автоматически подтвердить VIP-покупку. Обратитесь: /support")
-                return
-            inserted = await connection.fetchval(
-                """INSERT INTO bot_vip_payments
-                   (telegram_charge_id, payload, user_id, tier, amount)
-                   VALUES ($1, $2, $3, $4, $5)
-                   ON CONFLICT DO NOTHING RETURNING telegram_charge_id""",
-                payment.telegram_payment_charge_id,
-                payment.invoice_payload,
-                message.from_user.id,
-                intent["tier"],
-                payment.total_amount,
-            )
-            if not inserted:
-                return
-            await connection.execute(
-                """INSERT INTO bot_vip_memberships (user_id, tier, expires_at)
-                   VALUES ($1, $2, NOW() + INTERVAL '30 days')
-                   ON CONFLICT (user_id) DO UPDATE SET
-                     tier = EXCLUDED.tier,
-                     expires_at = GREATEST(bot_vip_memberships.expires_at, NOW())
-                                  + INTERVAL '30 days',
-                     updated_at = NOW()""",
-                message.from_user.id,
-                intent["tier"],
-            )
-            await connection.execute(
-                "UPDATE bot_vip_invoice_intents SET status = 'paid' WHERE payload = $1",
-                payment.invoice_payload,
-            )
-    tier = str(intent["tier"])
+            else:
+                inserted = await connection.fetchval(
+                    """INSERT INTO bot_vip_payments
+                       (telegram_charge_id, payload, user_id, tier, amount)
+                       VALUES ($1, $2, $3, $4, $5)
+                       ON CONFLICT DO NOTHING RETURNING telegram_charge_id""",
+                    payment.telegram_payment_charge_id,
+                    payment.invoice_payload,
+                    message.from_user.id,
+                    intent["tier"],
+                    payment.total_amount,
+                )
+                if inserted:
+                    await connection.execute(
+                        """INSERT INTO bot_vip_memberships (user_id, tier, expires_at)
+                           VALUES ($1, $2, NOW() + INTERVAL '30 days')
+                           ON CONFLICT (user_id) DO UPDATE SET
+                             tier = EXCLUDED.tier,
+                             expires_at = GREATEST(bot_vip_memberships.expires_at, NOW())
+                                          + INTERVAL '30 days',
+                             updated_at = NOW()""",
+                        message.from_user.id,
+                        intent["tier"],
+                    )
+                    await connection.execute(
+                        "UPDATE bot_vip_invoice_intents SET status = 'paid' WHERE payload = $1",
+                        payment.invoice_payload,
+                    )
+                    activated_tier = str(intent["tier"])
+
+    if invalid_payment:
+        await message.answer(
+            "Платёж получен, но его не удалось автоматически сопоставить с заказом. "
+            "Обратитесь в поддержку: /support"
+        )
+        return
+    if activated_tier is None:
+        return
     await message.answer(
-        f"✅ Оплата подтверждена. Активирован {TIERS[tier]['badge']} <b>{TIERS[tier]['name']}</b> "
-        "на 30 дней. Автопродления нет.\nПосмотреть срок: /vipstatus",
+        f"✅ Оплата подтверждена. Активирован {TIERS[activated_tier]['badge']} "
+        f"<b>{TIERS[activated_tier]['name']}</b> на 30 дней. Автопродления нет.\n"
+        "Посмотреть срок: /vipstatus",
         parse_mode="HTML",
     )
-
 
 async def pay_support_command(message: Message) -> None:
     await message.answer(
