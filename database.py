@@ -810,15 +810,23 @@ class Database:
         if actor_priority < 80 or not 0 <= min_priority <= 100 or min_priority > actor_priority:
             return False
         pool = self._require_pool()
-        await pool.execute(
-            """INSERT INTO chat_command_permissions
-               (chat_id, command_name, min_priority, updated_by)
-               VALUES ($1, $2, $3, $4)
-               ON CONFLICT (chat_id, command_name) DO UPDATE SET
-               min_priority = EXCLUDED.min_priority, updated_by = EXCLUDED.updated_by,
-               updated_at = NOW()""",
-            chat_id, command_name.lower(), min_priority, actor_id,
-        )
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                await connection.execute("SELECT pg_advisory_xact_lock($1)", chat_id)
+                await connection.execute(
+                    """INSERT INTO chat_command_permissions
+                       (chat_id, command_name, min_priority, updated_by)
+                       VALUES ($1, $2, $3, $4)
+                       ON CONFLICT (chat_id, command_name) DO UPDATE SET
+                       min_priority = EXCLUDED.min_priority, updated_by = EXCLUDED.updated_by,
+                       updated_at = NOW()""",
+                    chat_id, command_name.lower(), min_priority, actor_id,
+                )
+                await connection.execute(
+                    """INSERT INTO chat_role_audit (chat_id, actor_id, action, details)
+                       VALUES ($1, $2, 'edit_command', $3)""",
+                    chat_id, actor_id, f"{command_name.lower()}:{min_priority}",
+                )
         return True
 
     async def get_chat_command_priority(self, chat_id: int, command_name: str) -> int | None:
