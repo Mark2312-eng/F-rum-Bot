@@ -14,6 +14,7 @@ from database import database
 from system_roles import has_permission
 
 MAX_MESSAGE = 2000
+STAFF_APPLICATION_ROLES = {"helper", "moderator", "support"}
 WAITING_FOR_TICKET: set[int] = set()
 WAITING_FOR_REPLY: dict[int, int] = {}
 
@@ -134,6 +135,28 @@ async def ensure_support_schema() -> None:
         );
         CREATE INDEX IF NOT EXISTS support_messages_ticket_idx
             ON support_messages(ticket_id, created_at, id);
+        CREATE TABLE IF NOT EXISTS staff_applications (
+            id BIGSERIAL PRIMARY KEY, user_id BIGINT NOT NULL, username TEXT NOT NULL DEFAULT '',
+            requested_role TEXT NOT NULL CHECK (requested_role IN ('helper','moderator','support')),
+            experience TEXT NOT NULL CHECK (char_length(experience) BETWEEN 1 AND 1200),
+            motivation TEXT NOT NULL CHECK (char_length(motivation) BETWEEN 1 AND 2000),
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+            reviewed_by BIGINT, review_note TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), reviewed_at TIMESTAMPTZ
+        );
+        CREATE INDEX IF NOT EXISTS staff_applications_status_created_idx ON staff_applications(status, created_at DESC);
+        CREATE INDEX IF NOT EXISTS staff_applications_user_created_idx ON staff_applications(user_id, created_at DESC);
+        CREATE UNIQUE INDEX IF NOT EXISTS staff_applications_one_pending_user_idx
+            ON staff_applications(user_id) WHERE status='pending';
+        CREATE TABLE IF NOT EXISTS staff_application_events (
+            id BIGSERIAL PRIMARY KEY,
+            application_id BIGINT NOT NULL REFERENCES staff_applications(id),
+            actor_id BIGINT NOT NULL,
+            action TEXT NOT NULL CHECK (action IN ('submitted','approved','rejected')),
+            details TEXT NOT NULL DEFAULT '', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS staff_application_events_app_idx
+            ON staff_application_events(application_id, created_at DESC, id DESC);
     """)
 
 
@@ -563,12 +586,146 @@ async def support_close_command(message: Message) -> None:
     await message.answer("✅ Обращение закрыто." if result.endswith(" 1") else "Обращение не найдено или уже закрыто.")
 
 
+async def staff_application_create(request: web.Request) -> web.Response:
+    if not _origin_allowed(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
+    user_id = _session_user(request)
+    if user_id is None:
+        return _cors(request, web.json_response({"error": "Требуется вход через Telegram."}, status=401))
+    try:
+        data = await request.json()
+    except (ValueError, web.HTTPBadRequest):
+        raise web.HTTPBadRequest(text="Некорректный запрос.")
+    if not isinstance(data, dict):
+        raise web.HTTPBadRequest(text="Некорректный запрос.")
+    role = str(data.get("requested_role", "")).strip().lower()
+    experience = str(data.get("experience", "")).strip()[:1200]
+    motivation = str(data.get("motivation", "")).strip()[:2000]
+    if role not in STAFF_APPLICATION_ROLES:
+        raise web.HTTPBadRequest(text="Выберите доступную должность.")
+    if not experience or not motivation:
+        raise web.HTTPBadRequest(text="Заполните опыт и мотивацию.")
+    pool = database._require_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            pending = await conn.fetchval(
+                "SELECT id FROM staff_applications WHERE user_id=$1 AND status='pending' FOR UPDATE",
+                user_id,
+            )
+            if pending:
+                return _cors(request, web.json_response({"error": "У вас уже есть заявка на рассмотрении."}, status=409))
+            recent = await conn.fetchval(
+                "SELECT COUNT(*) FROM staff_applications WHERE user_id=$1 AND created_at >= NOW()-INTERVAL '30 days'",
+                user_id,
+            )
+            if int(recent or 0) >= 3:
+                return _cors(request, web.json_response({"error": "Можно отправить не более трёх заявок за 30 дней."}, status=429))
+            application_id = await conn.fetchval(
+                """INSERT INTO staff_applications(user_id,username,requested_role,experience,motivation)
+                   VALUES($1,$2,$3,$4,$5) RETURNING id""",
+                user_id, str(data.get("username", ""))[:64], role, experience, motivation,
+            )
+            await conn.execute(
+                "INSERT INTO staff_application_events(application_id,actor_id,action,details) VALUES($1,$2,'submitted',$3)",
+                application_id, user_id, f"Запрошенная должность: {role}",
+            )
+    return _cors(request, web.json_response({"ok": True, "application_id": application_id}, status=201))
+
+
+async def staff_application_list(request: web.Request) -> web.Response:
+    user_id = _session_user(request)
+    if user_id is None:
+        return _cors(request, web.json_response({"error": "Требуется вход через Telegram."}, status=401))
+    rows = await database._require_pool().fetch(
+        """SELECT id,requested_role,status,review_note,created_at,reviewed_at
+           FROM staff_applications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20""",
+        user_id,
+    )
+    return _cors(request, web.json_response({"applications": [{
+        "id": row["id"], "requested_role": row["requested_role"], "status": row["status"],
+        "review_note": row["review_note"], "created_at": row["created_at"].isoformat(),
+        "reviewed_at": row["reviewed_at"].isoformat() if row["reviewed_at"] else None,
+    } for row in rows]}))
+
+
+async def staff_application_admin_list(request: web.Request) -> web.Response:
+    user_id = _admin_session(request)
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if user_id is None or owner_id <= 0 or user_id != owner_id:
+        return _cors(request, web.json_response({"error": "Раздел доступен только владельцу бота."}, status=403))
+    rows = await database._require_pool().fetch(
+        """SELECT id,user_id,username,requested_role,experience,motivation,status,review_note,created_at,reviewed_by,reviewed_at
+           FROM staff_applications ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END,created_at DESC LIMIT 100"""
+    )
+    return _cors(request, web.json_response({"applications": [{
+        "id": row["id"], "user_id": row["user_id"], "username": row["username"],
+        "requested_role": row["requested_role"], "experience": row["experience"],
+        "motivation": row["motivation"], "status": row["status"], "review_note": row["review_note"],
+        "created_at": row["created_at"].isoformat(), "reviewed_by": row["reviewed_by"],
+        "reviewed_at": row["reviewed_at"].isoformat() if row["reviewed_at"] else None,
+    } for row in rows]}))
+
+
+async def staff_application_review(request: web.Request) -> web.Response:
+    if not _origin_allowed(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
+    user_id = _admin_session(request)
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if user_id is None or owner_id <= 0 or user_id != owner_id:
+        return _cors(request, web.json_response({"error": "Рассматривать заявки может только владелец бота."}, status=403))
+    try:
+        data = await request.json()
+    except (ValueError, web.HTTPBadRequest):
+        raise web.HTTPBadRequest(text="Некорректный запрос.")
+    if not isinstance(data, dict):
+        raise web.HTTPBadRequest(text="Некорректный запрос.")
+    action = str(data.get("action", "")).strip().lower()
+    note = str(data.get("note", "")).strip()[:500]
+    if action not in {"approved", "rejected"}:
+        raise web.HTTPBadRequest(text="Недопустимое решение.")
+    application_id = int(request.match_info["application_id"])
+    pool = database._require_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT user_id,status,requested_role FROM staff_applications WHERE id=$1 FOR UPDATE",
+                application_id,
+            )
+            if not row:
+                return _cors(request, web.json_response({"error": "Заявка не найдена."}, status=404))
+            if row["status"] != "pending":
+                return _cors(request, web.json_response({"error": "Заявка уже рассмотрена."}, status=409))
+            await conn.execute(
+                """UPDATE staff_applications SET status=$2,reviewed_by=$3,review_note=$4,reviewed_at=NOW()
+                   WHERE id=$1""", application_id, action, user_id, note,
+            )
+            await conn.execute(
+                "INSERT INTO staff_application_events(application_id,actor_id,action,details) VALUES($1,$2,$3,$4)",
+                application_id, user_id, action, note or "Без комментария",
+            )
+            applicant_id, requested_role = row["user_id"], row["requested_role"]
+    try:
+        outcome = "одобрена" if action == "approved" else "отклонена"
+        await request.app["bot"].send_message(
+            applicant_id,
+            f"Результат рассмотрения заявки #{application_id}: {outcome}.\n"
+            f"Запрошенная должность: {requested_role}.\nКомментарий: {note or 'не указан'}",
+        )
+    except Exception:
+        pass
+    return _cors(request, web.json_response({"ok": True, "status": action}))
+
+
 def register_support_routes(app: web.Application) -> None:
     app.router.add_route("OPTIONS", "/api/support/{tail:.*}", support_options)
     app.router.add_post("/api/support/auth/telegram", support_login)
     app.router.add_get("/api/support/me", support_me)
     app.router.add_post("/api/support/logout", support_logout)
     app.router.add_get("/api/support/tickets", support_list)
+    app.router.add_post("/api/support/applications", staff_application_create)
+    app.router.add_get("/api/support/applications", staff_application_list)
+    app.router.add_get("/api/support/staff/applications", staff_application_admin_list)
+    app.router.add_post("/api/support/staff/applications/{application_id:[0-9]+}/review", staff_application_review)
     app.router.add_post("/api/support/tickets", support_create)
     app.router.add_get("/api/support/tickets/{ticket_id:[0-9]+}", support_thread)
     app.router.add_post("/api/support/tickets/{ticket_id:[0-9]+}/messages", support_reply)
