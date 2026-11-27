@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from system_roles import ROLES, has_permission, role_key
+from system_roles import ROLES, can_manage_rank, has_permission, role_key, role_rank
 
 
 class SystemRoleTests(unittest.IsolatedAsyncioTestCase):
@@ -19,6 +19,15 @@ class SystemRoleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(role_key("chief-admin"), "chief_admin")
         self.assertEqual(role_key("директор_бота"), "director")
         self.assertIsNone(role_key("unknown_role"))
+
+    def test_role_hierarchy_requires_strictly_higher_rank(self):
+        self.assertEqual(role_rank("owner"), 100)
+        self.assertEqual(role_rank("director"), 90)
+        self.assertEqual(role_rank("moderator"), 30)
+        self.assertEqual(role_rank(None), 0)
+        self.assertTrue(can_manage_rank(60, 30))
+        self.assertFalse(can_manage_rank(30, 30))
+        self.assertFalse(can_manage_rank(30, 60))
 
     async def test_owner_has_all_permissions(self):
         self.assertTrue(await has_permission(100, 100, "technical"))
