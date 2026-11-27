@@ -16,7 +16,7 @@ from aiohttp import web
 from dotenv import load_dotenv
 
 from database import database
-from moderation import ban_member, clear_warnings, kick_member, moderate_message, mute_member, owner_summary, purge_messages, register_group, show_moderation_log, show_moderation_stats, show_warnings, unban_member, unmute_member, warn_member
+from moderation import ban_member, clear_warnings, kick_member, moderate_message, mute_member, owner_summary, purge_messages, register_group, show_ban_info, show_ban_list, show_moderation_log, show_moderation_stats, show_warning_history, show_warning_list, show_warnings, unban_member, unmute_member, warn_member
 from group_settings import apply_setting_callback, show_group_settings
 from advanced_moderation import blacklist_command, nickname_command, report_command, reportclose_command, reports_command, role_command
 from system_roles import staff_command, myrole_command, staffinfo_command, setrole_command, staffremove_command, stafflog_command, rolehelp_command, syshealth_command, reporthelp_command
@@ -450,8 +450,12 @@ async def cmd_help(message: Message) -> None:
         "/ping — проверить работу бота\n\n"
         "🛡 <b>Модерация группы</b>\n"
         "/warn ID — выдать предупреждение\n"
-        "/warns ID — посмотреть предупреждения\n"
+        "/warns ID — посмотреть текущие предупреждения\n"
+        "/warnhistory ID — история предупреждений\n"
+        "/warnlist — список участников с предупреждениями\n"
         "/clearwarns ID — сбросить предупреждения\n"
+        "/banlist — блокировки из журнала бота\n"
+        "/baninfo ID — последнее действие блокировки\n"
         "/mute ID — ограничить на 10 минут\n"
         "/unmute ID — снять ограничение\n"
         "/ban ID · /unban ID — блокировка и разблокировка\n"
@@ -756,6 +760,30 @@ async def group_warns_handler(message: Message, bot: Bot) -> None:
         await show_warnings(message, bot, owner_id)
 
 
+async def group_warnhistory_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await show_warning_history(message, bot, owner_id)
+
+
+async def group_warnlist_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await show_warning_list(message, bot, owner_id)
+
+
+async def group_banlist_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await show_ban_list(message, bot, owner_id)
+
+
+async def group_baninfo_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await show_ban_info(message, bot, owner_id)
+
+
 async def group_clearwarns_handler(message: Message, bot: Bot) -> None:
     owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
     if owner_id > 0:
@@ -939,6 +967,10 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(group_kick_handler, Command("kick"))
     dispatcher.message.register(group_purge_handler, Command("purge"))
     dispatcher.message.register(group_warns_handler, Command("warns"))
+    dispatcher.message.register(group_warnhistory_handler, Command("warnhistory"))
+    dispatcher.message.register(group_warnlist_handler, Command("warnlist"))
+    dispatcher.message.register(group_banlist_handler, Command("banlist"))
+    dispatcher.message.register(group_baninfo_handler, Command("baninfo"))
     dispatcher.message.register(group_clearwarns_handler, Command("clearwarns"))
     dispatcher.message.register(group_modstats_handler, Command("modstats"))
     dispatcher.message.register(group_warn_handler, lambda message: bool(message.text and message.text.startswith("!warn ")))
@@ -1058,6 +1090,10 @@ async def main() -> None:
             BotCommand(command="gm", description="Управление иммунитетом"),
             BotCommand(command="warn", description="Выдать предупреждение"),
             BotCommand(command="warns", description="Проверить предупреждения"),
+            BotCommand(command="warnhistory", description="История предупреждений"),
+            BotCommand(command="warnlist", description="Список с предупреждениями"),
+            BotCommand(command="banlist", description="Список блокировок из журнала"),
+            BotCommand(command="baninfo", description="Информация о блокировке"),
             BotCommand(command="clearwarns", description="Сбросить предупреждения"),
             BotCommand(command="mute", description="Ограничить на 10 минут"),
             BotCommand(command="unmute", description="Снять ограничение"),
