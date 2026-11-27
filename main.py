@@ -444,7 +444,8 @@ async def cmd_help(message: Message) -> None:
         "👤 <b>Форум</b>\n"
         "/profile НИК — открыть профиль участника\n"
         "/punish НИК — проверить статус наказания\n"
-        "/stats — статистика форума\n\n"
+        "/forumstats — статистика форума\n"
+        "/ping — проверить работу бота\n\n"
         "🛡 <b>Модерация группы</b>\n"
         "/warn ID — выдать предупреждение\n"
         "/warns ID — посмотреть предупреждения\n"
@@ -918,7 +919,8 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(cmd_help, Command("help"))
     dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
-    dispatcher.message.register(send_forum_stats, Command("forumstats"))\n    dispatcher.message.register(ping_command, lambda message: bool(message.text and message.text.split("@", 1)[0].strip().lower() == "/ping"))
+    dispatcher.message.register(send_forum_stats, Command("forumstats"))
+    dispatcher.message.register(ping_command, lambda message: bool(message.text and message.text.split("@", 1)[0].strip().lower() == "/ping"))
     dispatcher.message.register(cmd_owner, Command("owner"))
     dispatcher.message.register(cmd_myid, Command("myid"))
     dispatcher.message.register(cmd_chats, Command("chats"))
@@ -1017,7 +1019,8 @@ async def main() -> None:
             BotCommand(command="help", description="Список команд"),
             BotCommand(command="profile", description="Профиль форума"),
             BotCommand(command="punish", description="Проверить наказание"),
-            BotCommand(command="forumstats", description="Статистика форума"),\n            BotCommand(command="ping", description="Проверить работу бота"),
+            BotCommand(command="forumstats", description="Статистика форума"),
+            BotCommand(command="ping", description="Проверить работу бота"),
             BotCommand(command="connect", description="Подключить группу"),
             BotCommand(command="settings", description="Настройки модерации"),
             BotCommand(command="modlog", description="Журнал модерации"),
