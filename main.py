@@ -392,6 +392,108 @@ async def panel_dashboard(request: web.Request) -> web.Response:
     return _panel_cors(request, response)
 
 
+async def panel_moderation(request: web.Request) -> web.Response:
+    """Return real moderation reports, audit events and known group members."""
+    user_id = _panel_user(request)
+    if user_id is None:
+        return _panel_cors(request, web.json_response({"error": "Требуется авторизация."}, status=401))
+
+    pool = database._require_pool()
+    summary = await pool.fetchrow(
+        """SELECT
+             (SELECT COUNT(*) FROM moderation_reports WHERE status = 'open') AS open_reports,
+             (SELECT COUNT(*) FROM moderation_events
+                WHERE created_at >= NOW() - INTERVAL '7 days') AS events_week,
+             (SELECT COUNT(DISTINCT user_id) FROM chat_member_activity) AS members_count,
+             (SELECT COUNT(*) FROM moderation_warnings WHERE warning_count > 0) AS warned_members"""
+    )
+    reports = await pool.fetch(
+        """SELECT r.id, r.chat_id, COALESCE(c.title, '') AS chat_title,
+                  r.reporter_id, r.target_id, r.reason, r.created_at
+           FROM moderation_reports r
+           LEFT JOIN registered_chats c ON c.chat_id = r.chat_id
+           WHERE r.status = 'open'
+           ORDER BY r.created_at ASC LIMIT 100"""
+    )
+    events = await pool.fetch(
+        """SELECT e.chat_id, COALESCE(c.title, '') AS chat_title,
+                  e.actor_id, e.target_id, e.action, e.details, e.created_at
+           FROM moderation_events e
+           LEFT JOIN registered_chats c ON c.chat_id = e.chat_id
+           ORDER BY e.created_at DESC, e.id DESC LIMIT 50"""
+    )
+    members = await pool.fetch(
+        """SELECT a.chat_id, COALESCE(c.title, '') AS chat_title,
+                  a.user_id, a.username, a.display_name, a.message_count,
+                  a.first_seen_at, COALESCE(w.warning_count, 0) AS warning_count,
+                  COALESCE(rd.title, '') AS role_title
+           FROM chat_member_activity a
+           LEFT JOIN registered_chats c ON c.chat_id = a.chat_id
+           LEFT JOIN moderation_warnings w
+             ON w.chat_id = a.chat_id AND w.user_id = a.user_id
+           LEFT JOIN chat_member_roles mr
+             ON mr.chat_id = a.chat_id AND mr.user_id = a.user_id
+           LEFT JOIN chat_role_definitions rd
+             ON rd.chat_id = mr.chat_id AND rd.role_key = mr.role_key
+           ORDER BY a.message_count DESC, a.first_seen_at DESC LIMIT 100"""
+    )
+    payload = {
+        "summary": {key: int(summary[key] or 0) for key in
+                    ("open_reports", "events_week", "members_count", "warned_members")},
+        "reports": [{
+            "id": row["id"], "chat_id": row["chat_id"], "chat_title": row["chat_title"],
+            "reporter_id": row["reporter_id"], "target_id": row["target_id"],
+            "reason": row["reason"], "created_at": row["created_at"].isoformat(),
+        } for row in reports],
+        "events": [{
+            "chat_id": row["chat_id"], "chat_title": row["chat_title"],
+            "actor_id": row["actor_id"], "target_id": row["target_id"],
+            "action": row["action"], "details": row["details"],
+            "created_at": row["created_at"].isoformat(),
+        } for row in events],
+        "members": [{
+            "chat_id": row["chat_id"], "chat_title": row["chat_title"],
+            "user_id": row["user_id"], "username": row["username"],
+            "display_name": row["display_name"], "message_count": row["message_count"],
+            "warning_count": row["warning_count"], "role_title": row["role_title"],
+            "first_seen_at": row["first_seen_at"].isoformat(),
+        } for row in members],
+    }
+    return _panel_cors(request, web.json_response(payload))
+
+
+async def panel_close_report(request: web.Request) -> web.Response:
+    """Close one report for its own chat and record the action in the audit log."""
+    if not _panel_origin(request) or request.headers.get("Origin", "") != _panel_origin(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
+    user_id = _panel_user(request)
+    if user_id is None:
+        return _panel_cors(request, web.json_response({"error": "Требуется авторизация."}, status=401))
+
+    report_id = int(request.match_info["report_id"])
+    pool = database._require_pool()
+    async with pool.acquire() as connection:
+        async with connection.transaction():
+            report = await connection.fetchrow(
+                """UPDATE moderation_reports
+                   SET status = 'closed', closed_by = $2, closed_at = NOW()
+                   WHERE id = $1 AND status = 'open'
+                   RETURNING chat_id, target_id""",
+                report_id, user_id,
+            )
+            if report is None:
+                return _panel_cors(request, web.json_response(
+                    {"ok": False, "error": "Жалоба не найдена или уже закрыта."}, status=404
+                ))
+            await connection.execute(
+                """INSERT INTO moderation_events
+                   (chat_id, actor_id, target_id, action, details)
+                   VALUES ($1, $2, $3, 'report_closed', $4)""",
+                report["chat_id"], user_id, report["target_id"], f"Жалоба #{report_id}",
+            )
+    return _panel_cors(request, web.json_response({"ok": True, "report_id": report_id}))
+
+
 async def start_web_server(port: int) -> web.AppRunner:
     """Start health-check and authenticated admin-panel API endpoints."""
     app = web.Application(middlewares=[panel_cors_middleware])
@@ -403,6 +505,8 @@ async def start_web_server(port: int) -> web.AppRunner:
     app.router.add_get("/api/me", panel_me)
     app.router.add_post("/api/logout", panel_logout)
     app.router.add_get("/api/dashboard", panel_dashboard)
+    app.router.add_get("/api/moderation", panel_moderation)
+    app.router.add_post("/api/reports/{report_id:[0-9]+}/close", panel_close_report)
     runner = web.AppRunner(app, access_log=LOGGER)
     await runner.setup()
 
