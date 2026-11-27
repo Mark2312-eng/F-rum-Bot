@@ -29,6 +29,7 @@ from chat_roles import roles_command, newrole_command, delrole_command, set_chat
 from user_stats import ChatActivityMiddleware, user_stats_command
 from group_info import admins_command, chatinfo_command, rules_command, setrules_command
 from support_system import ensure_support_schema, register_support_routes, register_support_bot
+from privacy_broadcast import ensure_privacy_schema, has_consent, has_subscription_choice, show_consent_prompt, show_subscription_prompt, register_privacy_broadcast_handlers
 
 load_dotenv()
 
@@ -1046,6 +1047,13 @@ async def send_forum_stats(message: Message) -> None:
 
 
 async def cmd_start(message: Message) -> None:
+    if not message.from_user:
+        return
+    if not await has_consent(message.from_user.id):
+        await show_consent_prompt(message)
+        return
+    if not await has_subscription_choice(message.from_user.id):
+        await show_subscription_prompt(message)
     if await handle_test_start(message):
         return
     try:
@@ -1621,6 +1629,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher = Dispatcher()
     dispatcher.message.outer_middleware(ChatActivityMiddleware())
     register_support_bot(dispatcher)
+    register_privacy_broadcast_handlers(dispatcher)
     dispatcher.message.register(cmd_start, Command("start"))
     dispatcher.message.register(cmd_help, Command("help"))
     dispatcher.message.register(cmd_profile, Command("profile"))
@@ -1746,6 +1755,7 @@ async def main() -> None:
 
     try:
         await database.connect()
+        await ensure_privacy_schema()
         await ensure_support_schema()
         LOGGER.info("PostgreSQL connection established; support schema ready")
         runner = await start_web_server(port, bot)
@@ -1753,6 +1763,9 @@ async def main() -> None:
         await bot.delete_webhook(drop_pending_updates=True)
         await bot.set_my_commands([
             BotCommand(command="start", description="Открыть главное меню"),
+            BotCommand(command="stop", description="Отписаться от рассылки"),
+            BotCommand(command="withdraw_consent", description="Отозвать согласие и удалить запись"),
+            BotCommand(command="broadcast", description="Создать рассылку (владелец)"),
             BotCommand(command="help", description="Список команд"),
             BotCommand(command="profile", description="Профиль форума"),
             BotCommand(command="punish", description="Проверить наказание"),
