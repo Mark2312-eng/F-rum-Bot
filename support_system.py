@@ -622,9 +622,12 @@ async def staff_application_create(request: web.Request) -> web.Response:
                 return _cors(request, web.json_response({"error": "Можно отправить не более трёх заявок за 30 дней."}, status=429))
             application_id = await conn.fetchval(
                 """INSERT INTO staff_applications(user_id,username,requested_role,experience,motivation)
-                   VALUES($1,$2,$3,$4,$5) RETURNING id""",
+                   VALUES($1,$2,$3,$4,$5)
+                   ON CONFLICT (user_id) WHERE status='pending' DO NOTHING RETURNING id""",
                 user_id, str(data.get("username", ""))[:64], role, experience, motivation,
             )
+            if application_id is None:
+                return _cors(request, web.json_response({"error": "У вас уже есть заявка на рассмотрении."}, status=409))
             await conn.execute(
                 "INSERT INTO staff_application_events(application_id,actor_id,action,details) VALUES($1,$2,'submitted',$3)",
                 application_id, user_id, f"Запрошенная должность: {role}",
@@ -653,9 +656,15 @@ async def staff_application_admin_list(request: web.Request) -> web.Response:
     owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
     if user_id is None or owner_id <= 0 or user_id != owner_id:
         return _cors(request, web.json_response({"error": "Раздел доступен только владельцу бота."}, status=403))
-    rows = await database._require_pool().fetch(
+    pool = database._require_pool()
+    rows = await pool.fetch(
         """SELECT id,user_id,username,requested_role,experience,motivation,status,review_note,created_at,reviewed_by,reviewed_at
            FROM staff_applications ORDER BY CASE WHEN status='pending' THEN 0 ELSE 1 END,created_at DESC LIMIT 100"""
+    )
+    events = await pool.fetch(
+        """SELECT e.application_id,e.actor_id,e.action,e.details,e.created_at,a.user_id,a.requested_role
+           FROM staff_application_events e JOIN staff_applications a ON a.id=e.application_id
+           ORDER BY e.created_at DESC,e.id DESC LIMIT 100"""
     )
     return _cors(request, web.json_response({"applications": [{
         "id": row["id"], "user_id": row["user_id"], "username": row["username"],
@@ -663,7 +672,12 @@ async def staff_application_admin_list(request: web.Request) -> web.Response:
         "motivation": row["motivation"], "status": row["status"], "review_note": row["review_note"],
         "created_at": row["created_at"].isoformat(), "reviewed_by": row["reviewed_by"],
         "reviewed_at": row["reviewed_at"].isoformat() if row["reviewed_at"] else None,
-    } for row in rows]}))
+    } for row in rows], "events": [{
+        "application_id": row["application_id"], "user_id": row["user_id"],
+        "requested_role": row["requested_role"], "actor_id": row["actor_id"],
+        "action": row["action"], "details": row["details"],
+        "created_at": row["created_at"].isoformat(),
+    } for row in events]}))
 
 
 async def staff_application_review(request: web.Request) -> web.Response:
