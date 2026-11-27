@@ -10,12 +10,12 @@ from urllib.parse import urljoin, urlsplit
 import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from aiohttp import web
 from dotenv import load_dotenv
 
 from database import database
-from moderation import moderate_message, mute_member, owner_summary, register_group, show_moderation_log, unmute_member, warn_member
+from moderation import ban_member, clear_warnings, kick_member, moderate_message, mute_member, owner_summary, purge_messages, register_group, show_moderation_log, show_moderation_stats, show_warnings, unban_member, unmute_member, warn_member
 from group_settings import apply_setting_callback, show_group_settings
 
 load_dotenv()
@@ -360,9 +360,37 @@ async def cmd_start(message: Message) -> None:
         "👋 <b>VISE RUSSIA | MOSCOW</b>\n\n"
         "Бот управления и модерации Telegram-групп.\n\n"
         "Добавьте бота в группу и выдайте права администратора.\n"
-        "Выберите нужный раздел с помощью кнопок ниже.",
+        "Профили форума, проверка наказаний и инструменты модерации доступны через кнопки.\n"
+        "Команды: /help.",
         parse_mode="HTML",
         reply_markup=build_main_keyboard(forum_url, is_owner=bool(message.from_user and message.from_user.id == int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0"))),
+    )
+
+
+async def cmd_help(message: Message) -> None:
+    """List supported forum and moderation commands."""
+    await message.answer(
+        "🛡 <b>F-rum-Bot — команды</b>\\n\\n"
+        "<b>Форум:</b>\\n"
+        "/profile НИК — профиль XenForo\\n"
+        "/punish НИК — статус наказания\\n"
+        "/stats — статистика форума\\n\\n"
+        "<b>Модерация группы:</b>\\n"
+        "/warn ID — предупреждение\\n"
+        "/warns ID — посмотреть предупреждения\\n"
+        "/clearwarns ID — сбросить предупреждения\\n"
+        "/mute ID — мут на 10 минут\\n"
+        "/unmute ID — снять мут\\n"
+        "/ban ID и /unban ID — блокировка и снятие блокировки\\n"
+        "/kick ID — исключить участника\\n"
+        "/purge N — удалить последние 1–100 сообщений\\n"
+        "/modstats — статистика модерации за 7 дней\\n"
+        "/settings — настройки антифлуда и ссылок\\n"
+        "/modlog — журнал модерации\\n"
+        "/connect — подключить группу (владелец бота).\\n\\n"
+        "Команды модерации доступны владельцу и администраторам подключённой группы. "
+        "Боту нужны права администратора.",
+        parse_mode="HTML",
     )
 
 
@@ -597,6 +625,48 @@ async def group_unmute_handler(message: Message, bot: Bot) -> None:
         await unmute_member(message, bot, owner_id)
 
 
+async def group_ban_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await ban_member(message, bot, owner_id)
+
+
+async def group_unban_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await unban_member(message, bot, owner_id)
+
+
+async def group_kick_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await kick_member(message, bot, owner_id)
+
+
+async def group_purge_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await purge_messages(message, bot, owner_id)
+
+
+async def group_warns_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await show_warnings(message, bot, owner_id)
+
+
+async def group_clearwarns_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await clear_warnings(message, bot, owner_id)
+
+
+async def group_modstats_handler(message: Message, bot: Bot) -> None:
+    owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
+    if owner_id > 0:
+        await show_moderation_stats(message, bot, owner_id)
+
+
 async def button_input_handler(message: Message) -> None:
     """Consume requested forum lookup or moderation target input."""
     if not message.from_user or not message.text:
@@ -622,6 +692,7 @@ def create_dispatcher() -> Dispatcher:
     """Configure the moderation-first Telegram dispatcher."""
     dispatcher = Dispatcher()
     dispatcher.message.register(cmd_start, Command("start"))
+    dispatcher.message.register(cmd_help, Command("help"))
     dispatcher.message.register(cmd_profile, Command("profile"))
     dispatcher.message.register(cmd_punish, Command("punish"))
     dispatcher.message.register(send_forum_stats, Command("stats"))
@@ -634,6 +705,13 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(group_warn_handler, Command("warn"))
     dispatcher.message.register(group_mute_handler, Command("mute"))
     dispatcher.message.register(group_unmute_handler, Command("unmute"))
+    dispatcher.message.register(group_ban_handler, Command("ban"))
+    dispatcher.message.register(group_unban_handler, Command("unban"))
+    dispatcher.message.register(group_kick_handler, Command("kick"))
+    dispatcher.message.register(group_purge_handler, Command("purge"))
+    dispatcher.message.register(group_warns_handler, Command("warns"))
+    dispatcher.message.register(group_clearwarns_handler, Command("clearwarns"))
+    dispatcher.message.register(group_modstats_handler, Command("modstats"))
     dispatcher.message.register(button_input_handler, lambda message: bool(message.from_user and message.from_user.id in PENDING_INPUTS))
     dispatcher.message.register(group_moderation_handler)
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
@@ -665,7 +743,26 @@ async def main() -> None:
         LOGGER.info("PostgreSQL connection established")
         runner = await start_web_server(port)
         await bot.delete_webhook(drop_pending_updates=True)
-        await bot.delete_my_commands()
+        await bot.set_my_commands([
+            BotCommand(command="start", description="Открыть главное меню"),
+            BotCommand(command="help", description="Список команд"),
+            BotCommand(command="profile", description="Профиль форума"),
+            BotCommand(command="punish", description="Проверить наказание"),
+            BotCommand(command="stats", description="Статистика форума"),
+            BotCommand(command="connect", description="Подключить группу"),
+            BotCommand(command="settings", description="Настройки модерации"),
+            BotCommand(command="modlog", description="Журнал модерации"),
+            BotCommand(command="modstats", description="Статистика модерации"),
+            BotCommand(command="warn", description="Выдать предупреждение"),
+            BotCommand(command="warns", description="Проверить предупреждения"),
+            BotCommand(command="clearwarns", description="Сбросить предупреждения"),
+            BotCommand(command="mute", description="Ограничить на 10 минут"),
+            BotCommand(command="unmute", description="Снять ограничение"),
+            BotCommand(command="ban", description="Заблокировать участника"),
+            BotCommand(command="unban", description="Снять блокировку"),
+            BotCommand(command="kick", description="Исключить участника"),
+            BotCommand(command="purge", description="Очистить сообщения"),
+        ])
         await dispatcher.start_polling(bot)
     finally:
         if runner is not None:
