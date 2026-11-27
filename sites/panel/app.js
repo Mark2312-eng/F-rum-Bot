@@ -75,7 +75,6 @@ $("people-table").addEventListener("click",async event=>{
   try{
     await request(assign?"/api/members/role":"/api/members/role/remove",{method:"POST",body:JSON.stringify({chat_id:chatId,user_id:userId,...(assign?{role_key:roleKey}:{})})});
     toast(assign?"Роль назначена.":"Роль снята.");
-    await loadPeople();
     await loadDashboard();
   }catch(e){toast(e.message,"error");button.disabled=false;button.textContent=assign?"Назначить":"Снять";}
 });
