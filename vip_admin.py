@@ -103,23 +103,29 @@ async def _handle_callback(callback: CallbackQuery) -> None:
         _set_pending(message.chat.id, callback.from_user.id, "revoke")
         await message.answer("Отправьте Telegram ID пользователя, у которого нужно снять VIP.")
     elif action.startswith("revoke_confirm:"):
-        raw_id = action.split(":", 1)[1]
-        if not raw_id.isdigit():
-            await callback.answer("Некорректный ID.", show_alert=True)
+        parts = action.split(":")
+        if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
+            await callback.answer("Некорректное подтверждение.", show_alert=True)
             return
-        target_id = int(raw_id)
+        target_id, expected_expiry_us = int(parts[1]), int(parts[2])
         pool = database._require_pool()
         async with pool.acquire() as connection:
             async with connection.transaction():
                 previous = await connection.fetchrow(
-                    "SELECT tier, expires_at FROM bot_vip_memberships WHERE user_id = $1 FOR UPDATE",
+                    """SELECT tier, expires_at FROM bot_vip_memberships
+                       WHERE user_id = $1 AND expires_at > NOW() FOR UPDATE""",
                     target_id,
                 )
                 if previous is None:
-                    await callback.answer("VIP-запись уже отсутствует.", show_alert=True)
+                    await callback.answer("Активная VIP-запись уже отсутствует.", show_alert=True)
+                    return
+                current_expiry_us = int(previous["expires_at"].timestamp() * 1_000_000)
+                if current_expiry_us != expected_expiry_us:
+                    await callback.answer("Подтверждение устарело. Запросите снятие заново.", show_alert=True)
                     return
                 await connection.execute(
-                    "DELETE FROM bot_vip_memberships WHERE user_id = $1", target_id
+                    "DELETE FROM bot_vip_memberships WHERE user_id = $1 AND expires_at = $2",
+                    target_id, previous["expires_at"],
                 )
                 await connection.execute(
                     """INSERT INTO bot_vip_admin_audit
@@ -157,23 +163,30 @@ async def _handle_input(message: Message) -> None:
             return
         target_id, tier, days = parsed
         pool = database._require_pool()
-        row = await pool.fetchrow(
-            """INSERT INTO bot_vip_memberships (user_id, tier, expires_at)
-               VALUES ($1, $2, NOW() + ($3 * INTERVAL '1 day'))
-               ON CONFLICT (user_id) DO UPDATE SET
-                 tier = EXCLUDED.tier,
-                 expires_at = GREATEST(bot_vip_memberships.expires_at, NOW())
-                              + ($3 * INTERVAL '1 day'),
-                 updated_at = NOW()
-               RETURNING expires_at""",
-            target_id, tier, days,
-        )
-        await pool.execute(
-            """INSERT INTO bot_vip_admin_audit
-               (actor_user_id, target_user_id, action, tier, days, new_expires_at)
-               VALUES ($1, $2, 'grant', $3, $4, $5)""",
-            message.from_user.id, target_id, tier, days, row["expires_at"],
-        )
+        async with pool.acquire() as connection:
+            async with connection.transaction():
+                previous = await connection.fetchval(
+                    "SELECT expires_at FROM bot_vip_memberships WHERE user_id = $1 FOR UPDATE",
+                    target_id,
+                )
+                row = await connection.fetchrow(
+                    """INSERT INTO bot_vip_memberships (user_id, tier, expires_at)
+                       VALUES ($1, $2, NOW() + ($3 * INTERVAL '1 day'))
+                       ON CONFLICT (user_id) DO UPDATE SET
+                         tier = EXCLUDED.tier,
+                         expires_at = GREATEST(bot_vip_memberships.expires_at, NOW())
+                                      + ($3 * INTERVAL '1 day'),
+                         updated_at = NOW()
+                       RETURNING expires_at""",
+                    target_id, tier, days,
+                )
+                await connection.execute(
+                    """INSERT INTO bot_vip_admin_audit
+                       (actor_user_id, target_user_id, action, tier, days,
+                        previous_expires_at, new_expires_at)
+                       VALUES ($1, $2, 'grant', $3, $4, $5, $6)""",
+                    message.from_user.id, target_id, tier, days, previous, row["expires_at"],
+                )
         expiry = row["expires_at"].strftime("%d.%m.%Y %H:%M UTC")
         await message.answer(
             f"✅ Выдан / продлён {TIERS[tier]['badge']} <b>{TIERS[tier]['name']}</b>\n"
@@ -203,7 +216,7 @@ async def _handle_input(message: Message) -> None:
             await message.answer("У пользователя нет активного VIP.")
             return
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⚠️ Подтвердить снятие", callback_data=f"owner:vipadmin:revoke_confirm:{target_id}")],
+            [InlineKeyboardButton(text="⚠️ Подтвердить снятие", callback_data=f"owner:vipadmin:revoke_confirm:{target_id}:{int(membership['expires_at'].timestamp() * 1_000_000)}")],
             [InlineKeyboardButton(text="Отмена", callback_data="owner:vipadmin:cancel")],
         ])
         await message.answer(
