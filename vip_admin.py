@@ -173,7 +173,7 @@ async def _handle_callback(callback: CallbackQuery) -> None:
             [InlineKeyboardButton(text="⬅️ Панель владельца", callback_data="owner_panel")],
         ])
         await callback.answer()
-        await message.answer("\\n".join(lines), parse_mode="HTML", reply_markup=keyboard)
+        await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=keyboard)
     elif action == "cancel":
         _PENDING.pop((message.chat.id, callback.from_user.id), None)
         await callback.answer("Отменено.")
