@@ -67,7 +67,7 @@ def build_user_stats_message(user, stats, role_title: str, blocked: bool, vip_me
         if details:
             expires_at = vip_membership.get("expires_at")
             expiry = _date(expires_at)
-            vip_status = f"{details["badge"]} {escape(details["name"])} до {escape(expiry)}"
+            vip_status = f"{details['badge']} {escape(details['name'])} до {escape(expiry)}"
         else:
             vip_status = "активен"
     else:
@@ -80,7 +80,7 @@ def build_user_stats_message(user, stats, role_title: str, blocked: bool, vip_me
         f"🚧 Блокировка чата: {status}\n"
         f"📅 {date_label}: {first_seen}\n\n"
         "📋 <b>Глобальная информация:</b>\n"
-        "💎 VIP статус: нет данных\n"
+        f"💎 VIP статус: {vip_status}\n"
         f"✍️ Сообщений отправлено: {messages}\n"
         f"📆 Сообщений сегодня: {today}\n"
         f"🏆 Место по активности: {rank_text}\n"
