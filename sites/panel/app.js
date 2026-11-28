@@ -184,3 +184,45 @@ $("system-staff-table")?.addEventListener("click",async event=>{
   try{await request("/api/system/staff/remove",{method:"POST",body:JSON.stringify({user_id})});toast("Системная должность снята.");await loadDashboard();}
   catch(error){toast(error.message,"error");button.disabled=false;}
 });
+
+
+/* Progressive dashboard motion and active section navigation. */
+(() => {
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reveal = () => {
+    const nodes = document.querySelectorAll('#dashboard .stats article, #dashboard .block');
+    if (reduced || !('IntersectionObserver' in window)) {
+      nodes.forEach(node => node.classList.add('motion-visible'));
+      return;
+    }
+    const observer = new IntersectionObserver((entries, current) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add('motion-visible');
+        current.unobserve(entry.target);
+      });
+    }, { threshold: 0.08, rootMargin: '0px 0px -24px 0px' });
+    nodes.forEach(node => observer.observe(node));
+  };
+  const navLinks = [...document.querySelectorAll('.dash-nav a[href^="#"]')];
+  if ('IntersectionObserver' in window && navLinks.length) {
+    const sections = navLinks.map(link => document.querySelector(link.getAttribute('href'))).filter(Boolean);
+    const navObserver = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        navLinks.forEach(link => {
+          const active = link.getAttribute('href') === '#' + entry.target.id;
+          link.classList.toggle('active', active);
+          if (active) link.setAttribute('aria-current', 'location');
+          else link.removeAttribute('aria-current');
+        });
+      });
+    }, { rootMargin: '-18% 0px -68% 0px', threshold: 0 });
+    sections.forEach(section => navObserver.observe(section));
+  }
+  const dashboard = document.getElementById('dashboard');
+  if (dashboard) new MutationObserver(() => {
+    if (!dashboard.hidden) reveal();
+  }).observe(dashboard, { attributes: true, attributeFilter: ['hidden'] });
+  reveal();
+})();
