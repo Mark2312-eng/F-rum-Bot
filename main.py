@@ -34,6 +34,7 @@ from vip_stars import TIERS, ensure_vip_schema, register_vip_handlers, tier_pric
 from vip_admin import ensure_vip_admin_schema, register_vip_admin_handlers
 from community_events import ensure_events_schema, register_events_poll_handlers
 from community_rewards import ensure_community_rewards_schema, register_community_rewards_handlers
+from community_owner import register_community_owner_handlers
 from staff_role_catalog import DEPARTMENT_TITLES, ROLE_CATALOG
 from system_roles import ROLES as SYSTEM_ROLE_DEFINITIONS
 
@@ -278,6 +279,7 @@ def build_owner_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⚠️ Предупредить", callback_data="owner:warn"), InlineKeyboardButton(text="🔇 Мут 10 мин", callback_data="owner:mute")],
         [InlineKeyboardButton(text="🔊 Снять мут", callback_data="owner:unmute")],
         [InlineKeyboardButton(text="💎 VIP-магазин", callback_data="owner:vip")],
+        [InlineKeyboardButton(text="🎉 Конкурсы и промокоды", callback_data="owner:community:home")],
         [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
     ])
 
@@ -1786,6 +1788,7 @@ def create_dispatcher() -> Dispatcher:
     register_vip_admin_handlers(dispatcher)
     register_events_poll_handlers(dispatcher)
     register_community_rewards_handlers(dispatcher)
+    register_community_owner_handlers(dispatcher)
     dispatcher.message.register(cmd_start, Command("start"))
     dispatcher.message.register(cmd_help, Command("help"))
     dispatcher.message.register(cmd_profile, Command("profile"))
