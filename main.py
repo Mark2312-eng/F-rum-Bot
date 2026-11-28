@@ -1910,6 +1910,7 @@ async def main() -> None:
         await database.connect()
         await ensure_privacy_schema()
         await ensure_vip_schema()
+        await ensure_vip_admin_schema()
         await ensure_events_schema()
         await ensure_support_schema()
         LOGGER.info("PostgreSQL connection established; support schema ready")
