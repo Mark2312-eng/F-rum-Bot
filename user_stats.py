@@ -9,6 +9,7 @@ from aiogram.enums import ChatType
 from aiogram.types import Message
 
 from database import database
+from vip_stars import TIERS, active_vip_membership
 
 
 class ChatActivityMiddleware(BaseMiddleware):
@@ -47,7 +48,7 @@ def _date(value) -> str:
     return str(value)
 
 
-def build_user_stats_message(user, stats, role_title: str, blocked: bool) -> str:
+def build_user_stats_message(user, stats, role_title: str, blocked: bool, vip_membership=None) -> str:
     nickname = stats.get("nickname") or user.full_name
     first_seen = _date(stats.get("first_seen_at"))
     date_label = "Дата вступления в чат" if stats.get("join_event_seen") else "Впервые замечен ботом"
@@ -60,6 +61,17 @@ def build_user_stats_message(user, stats, role_title: str, blocked: bool) -> str
     rank = stats.get("activity_rank")
     rank_text = f"№{int(rank)}" if rank else "нет данных"
     username = f"@{escape(user.username)}" if user.username else "не указан"
+    if vip_membership:
+        tier = str(vip_membership.get("tier") or "")
+        details = TIERS.get(tier)
+        if details:
+            expires_at = vip_membership.get("expires_at")
+            expiry = _date(expires_at)
+            vip_status = f"{details["badge"]} {escape(details["name"])} до {escape(expiry)}"
+        else:
+            vip_status = "активен"
+    else:
+        vip_status = "нет"
     return (
         "🔎 <b>Информация о пользователе:</b>\n\n"
         f"🗣 Статус: ✨ {escape(role_title)}\n"
@@ -125,8 +137,9 @@ async def user_stats_command(message: Message) -> None:
     blocked = member.status == "kicked" or (
         member.status == "restricted" and not getattr(member, "can_send_messages", True)
     )
+    vip_membership = await active_vip_membership(target.id)
     await message.answer(
-        build_user_stats_message(target, stats, role_title, blocked),
+        build_user_stats_message(target, stats, role_title, blocked, vip_membership),
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
