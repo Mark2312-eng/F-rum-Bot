@@ -1299,6 +1299,7 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
                 [InlineKeyboardButton(text="🧾 История платежей", callback_data="owner:vip:sales")],
                 [InlineKeyboardButton(text="➕ Выдать / продлить VIP", callback_data="owner:vipadmin:grant")],
                 [InlineKeyboardButton(text="➖ Снять VIP", callback_data="owner:vipadmin:revoke")],
+                [InlineKeyboardButton(text="📋 Журнал действий", callback_data="owner:vipadmin:audit")],
                 [InlineKeyboardButton(text="🔄 Обновить", callback_data="owner:vip")],
                 [InlineKeyboardButton(text="⬅️ Панель владельца", callback_data="owner_panel")],
             ])

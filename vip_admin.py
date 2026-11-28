@@ -80,6 +80,7 @@ async def _show_vip_menu(message: Message) -> None:
         [InlineKeyboardButton(text="🧾 История платежей", callback_data="owner:vip:sales")],
         [InlineKeyboardButton(text="➕ Выдать / продлить VIP", callback_data="owner:vipadmin:grant")],
         [InlineKeyboardButton(text="➖ Снять VIP", callback_data="owner:vipadmin:revoke")],
+        [InlineKeyboardButton(text="📋 Журнал действий", callback_data="owner:vipadmin:audit")],
         [InlineKeyboardButton(text="⬅️ Панель владельца", callback_data="owner_panel")],
     ])
     await message.answer("💎 <b>Управление VIP</b>\nВыберите действие:", parse_mode="HTML", reply_markup=keyboard)
@@ -139,6 +140,40 @@ async def _handle_callback(callback: CallbackQuery) -> None:
             await callback.bot.send_message(target_id, "Ваш VIP-статус был отключён владельцем проекта.")
         except Exception:
             LOGGER.info("Could not notify user %s about VIP revocation", target_id)
+    elif action == "audit":
+        pool = database._require_pool()
+        rows = await pool.fetch(
+            """SELECT actor_user_id, target_user_id, action, tier, days,
+                      previous_expires_at, new_expires_at, created_at
+               FROM bot_vip_admin_audit
+               ORDER BY id DESC LIMIT 20"""
+        )
+        lines = ["📋 <b>Журнал ручного управления VIP</b>", ""]
+        for row in rows:
+            tier = TIERS.get(str(row["tier"]), {})
+            tier_name = tier.get("name", str(row["tier"] or "—"))
+            verb = "выдал / продлил" if row["action"] == "grant" else "снял"
+            created = row["created_at"].strftime("%d.%m.%Y %H:%M UTC")
+            detail = tier_name
+            if row["days"]:
+                detail += f", +{int(row['days'])} дн."
+            if row["new_expires_at"]:
+                detail += f", до {row['new_expires_at'].strftime('%d.%m.%Y')}"
+            elif row["previous_expires_at"]:
+                detail += f", прежний срок до {row['previous_expires_at'].strftime('%d.%m.%Y')}"
+            lines.append(
+                f"• <code>{int(row['actor_user_id'])}</code> {verb} "
+                f"<code>{int(row['target_user_id'])}</code> — {detail}\n"
+                f"  <i>{created}</i>"
+            )
+        if not rows:
+            lines.append("Ручных изменений пока нет.")
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ К VIP-магазину", callback_data="owner:vip")],
+            [InlineKeyboardButton(text="⬅️ Панель владельца", callback_data="owner_panel")],
+        ])
+        await callback.answer()
+        await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=keyboard)
     elif action == "cancel":
         _PENDING.pop((message.chat.id, callback.from_user.id), None)
         await callback.answer("Отменено.")
