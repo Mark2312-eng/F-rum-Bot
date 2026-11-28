@@ -36,6 +36,7 @@ from vip_admin import ensure_vip_admin_schema, register_vip_admin_handlers
 from community_events import ensure_events_schema, register_events_poll_handlers
 from community_rewards import ensure_community_rewards_schema, register_community_rewards_handlers
 from community_owner import register_community_owner_handlers
+from panel_security import SlidingWindowLimiter, TelegramLoginReplayGuard
 from staff_role_catalog import DEPARTMENT_TITLES, ROLE_CATALOG
 from system_roles import ROLES as SYSTEM_ROLE_DEFINITIONS
 
@@ -46,6 +47,10 @@ DEFAULT_PORT = 10000
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15, connect=5, sock_read=10)
 PENDING_INPUTS: dict[tuple[int, int], tuple[str, float]] = {}
 PENDING_INPUT_TTL_SECONDS = 300
+PANEL_LOGIN_IP_LIMITER = SlidingWindowLimiter()
+PANEL_LOGIN_USER_LIMITER = SlidingWindowLimiter()
+PANEL_LOGIN_REPLAY_GUARD = TelegramLoginReplayGuard()
+PANEL_LOGIN_WINDOW_SECONDS = 600
 
 
 def set_pending_input(chat_id: int, user_id: int, action: str) -> None:
@@ -318,6 +323,12 @@ async def panel_cors_middleware(
         response = exc
     if request.path.startswith("/api/"):
         _panel_cors(request, response)
+        response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 
@@ -385,6 +396,14 @@ async def panel_config(request: web.Request) -> web.Response:
 async def panel_login(request: web.Request) -> web.Response:
     if request.headers.get("Origin", "") != _panel_origin(request) or not _panel_origin(request):
         raise web.HTTPForbidden(text="Недопустимый источник запроса.")
+    remote = request.remote or "unknown"
+    if not PANEL_LOGIN_IP_LIMITER.allow(
+        remote, limit=30, window_seconds=PANEL_LOGIN_WINDOW_SECONDS
+    ):
+        raise web.HTTPTooManyRequests(
+            text="Слишком много попыток входа. Попробуйте позже.",
+            headers={"Retry-After": str(PANEL_LOGIN_WINDOW_SECONDS)},
+        )
     try:
         data = await request.json()
     except (ValueError, json.JSONDecodeError):
@@ -396,6 +415,18 @@ async def panel_login(request: web.Request) -> web.Response:
     if not bot_token or not _telegram_login_valid(data, bot_token):
         raise web.HTTPUnauthorized(text="Не удалось подтвердить вход через Telegram.")
     user_id = int(data.get("id", 0))
+    if not PANEL_LOGIN_USER_LIMITER.allow(
+        str(user_id), limit=6, window_seconds=PANEL_LOGIN_WINDOW_SECONDS
+    ):
+        raise web.HTTPTooManyRequests(
+            text="Слишком много попыток входа для этого аккаунта. Попробуйте позже.",
+            headers={"Retry-After": str(PANEL_LOGIN_WINDOW_SECONDS)},
+        )
+    auth_date = int(data["auth_date"])
+    if not PANEL_LOGIN_REPLAY_GUARD.consume(
+        data, expires_at=auth_date + 600, now=int(time.time())
+    ):
+        raise web.HTTPUnauthorized(text="Эти данные входа уже использованы. Откройте вход через Telegram заново.")
     owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
     is_owner = admin_id.isdigit() and user_id == int(admin_id)
     is_support_staff = await has_permission(user_id, owner_id, "support")
@@ -417,6 +448,8 @@ async def panel_me(request: web.Request) -> web.Response:
 
 
 async def panel_logout(request: web.Request) -> web.Response:
+    if not _panel_origin(request) or request.headers.get("Origin", "") != _panel_origin(request):
+        raise web.HTTPForbidden(text="Недопустимый источник запроса.")
     response = web.json_response({"ok": True})
     response.del_cookie("panel_session", path="/", secure=True, httponly=True, samesite="None")
     return _panel_cors(request, response)
@@ -903,7 +936,7 @@ async def panel_remove_member_role(request: web.Request) -> web.Response:
 
 async def start_web_server(port: int, bot: Bot) -> web.AppRunner:
     """Start health-check and authenticated admin-panel API endpoints."""
-    app = web.Application(middlewares=[panel_cors_middleware])
+    app = web.Application(middlewares=[panel_cors_middleware], client_max_size=32 * 1024)
     app["bot"] = bot
     app.router.add_get("/", health_check)
     app.router.add_get("/health", health_check)
