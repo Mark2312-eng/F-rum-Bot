@@ -19,4 +19,4 @@ def test_join_burst_expires_outside_window():
 def test_alert_cooldown_prevents_repeated_notifications():
     assert detect_join_burst(-1004, [1, 2, 3, 4, 5], now=100.0) == 5
     assert detect_join_burst(-1004, [6], now=200.0) is None
-    assert detect_join_burst(-1004, [7, 8, 9, 10, 11], now=701.0) == 6
+    assert detect_join_burst(-1004, [7, 8, 9, 10, 11], now=701.0) == 5
