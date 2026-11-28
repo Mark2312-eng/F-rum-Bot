@@ -87,7 +87,9 @@ async def community_owner_callback(callback: CallbackQuery) -> None:
     await callback.answer()
     action = (callback.data or "").split(":")
     operation = action[2] if len(action) >= 3 else ""
-    if operation == "contests":
+    if operation == "home":
+        await callback.message.answer("🎉 <b>Конкурсы и промокоды</b>\\nВыберите действие:", parse_mode="HTML", reply_markup=_menu())
+    elif operation == "contests":
         await _show_contests(callback.message)
     elif operation == "promos":
         await _show_promos(callback.message)
