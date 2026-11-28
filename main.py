@@ -30,7 +30,7 @@ from user_stats import ChatActivityMiddleware, user_stats_command
 from group_info import admins_command, chatinfo_command, rules_command, setrules_command
 from support_system import ensure_support_schema, register_support_routes, register_support_bot
 from privacy_broadcast import ensure_privacy_schema, has_consent, has_subscription_choice, show_consent_prompt, show_subscription_prompt, register_privacy_broadcast_handlers
-from vip_stars import ensure_vip_schema, register_vip_handlers
+from vip_stars import TIERS, ensure_vip_schema, register_vip_handlers, tier_price
 from community_events import ensure_events_schema, register_events_poll_handlers
 from staff_role_catalog import DEPARTMENT_TITLES, ROLE_CATALOG
 from system_roles import ROLES as SYSTEM_ROLE_DEFINITIONS
@@ -275,6 +275,7 @@ def build_owner_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="➕ Подключить эту группу", callback_data="owner:connect")],
         [InlineKeyboardButton(text="⚠️ Предупредить", callback_data="owner:warn"), InlineKeyboardButton(text="🔇 Мут 10 мин", callback_data="owner:mute")],
         [InlineKeyboardButton(text="🔊 Снять мут", callback_data="owner:unmute")],
+        [InlineKeyboardButton(text="💎 VIP-магазин", callback_data="owner:vip")],
         [InlineKeyboardButton(text="⬅️ Главное меню", callback_data="menu:home")],
     ])
 
@@ -1255,6 +1256,92 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
             )
             return
         action = data.split(":", 1)[1]
+        if action == "vip":
+            pool = database._require_pool()
+            counts = await pool.fetch(
+                """SELECT tier, COUNT(*) AS amount
+                   FROM bot_vip_memberships WHERE expires_at > NOW()
+                   GROUP BY tier"""
+            )
+            active_counts = {str(row["tier"]): int(row["amount"]) for row in counts}
+            totals = await pool.fetchrow(
+                """SELECT COUNT(*) AS payments,
+                          COALESCE(SUM(amount), 0) AS stars
+                   FROM bot_vip_payments"""
+            )
+            expired = await pool.fetchval(
+                "SELECT COUNT(*) FROM bot_vip_memberships WHERE expires_at <= NOW()"
+            )
+            lines = [
+                "💎 <b>Управление VIP-магазином</b>",
+                "",
+                "📦 <b>Тарифы и цены сейчас:</b>",
+            ]
+            for tier, details in TIERS.items():
+                price = tier_price(tier)
+                price_label = f"{price} ⭐" if price is not None else "не настроена"
+                lines.append(
+                    f"{details['badge']} {details['name']} — {price_label} "
+                    f"· активных: {active_counts.get(tier, 0)}"
+                )
+            lines.extend([
+                "",
+                f"👥 Активных подписок: <b>{sum(active_counts.values())}</b>",
+                f"⌛ Истекших подписок: <b>{int(expired or 0)}</b>",
+                f"🧾 Оплаченных заказов: <b>{int(totals['payments'] or 0)}</b>",
+                f"⭐ Получено Stars: <b>{int(totals['stars'] or 0)}</b>",
+                "",
+                "Цены берутся из настроек Render. Уже купленные подписки не меняются.",
+            ])
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="👥 Активные VIP", callback_data="owner:vip:buyers")],
+                [InlineKeyboardButton(text="🧾 История платежей", callback_data="owner:vip:sales")],
+                [InlineKeyboardButton(text="🔄 Обновить", callback_data="owner:vip")],
+                [InlineKeyboardButton(text="⬅️ Панель владельца", callback_data="owner_panel")],
+            ])
+            await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=keyboard)
+            return
+        if action in {"vip:buyers", "vip:sales"}:
+            pool = database._require_pool()
+            if action == "vip:buyers":
+                rows = await pool.fetch(
+                    """SELECT user_id, tier, expires_at
+                       FROM bot_vip_memberships
+                       WHERE expires_at > NOW()
+                       ORDER BY expires_at DESC LIMIT 20"""
+                )
+                lines = ["👥 <b>Активные VIP-подписки</b>", ""]
+                for row in rows:
+                    tier = str(row["tier"])
+                    expiry = row["expires_at"].strftime("%d.%m.%Y %H:%M UTC")
+                    lines.append(
+                        f"• <code>{int(row['user_id'])}</code> — "
+                        f"{TIERS[tier]['badge']} {TIERS[tier]['name']} до {expiry}"
+                    )
+                empty = "Активных подписок пока нет."
+            else:
+                rows = await pool.fetch(
+                    """SELECT user_id, tier, amount, paid_at
+                       FROM bot_vip_payments
+                       ORDER BY paid_at DESC LIMIT 20"""
+                )
+                lines = ["🧾 <b>Последние платежи VIP</b>", ""]
+                for row in rows:
+                    tier = str(row["tier"])
+                    paid_at = row["paid_at"].strftime("%d.%m.%Y %H:%M UTC")
+                    lines.append(
+                        f"• <code>{int(row['user_id'])}</code> — "
+                        f"{TIERS[tier]['name']} · {int(row['amount'])} ⭐ · {paid_at}"
+                    )
+                empty = "Платежей пока нет."
+            if not rows:
+                lines.append(empty)
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ К VIP-магазину", callback_data="owner:vip")],
+                [InlineKeyboardButton(text="⬅️ Панель владельца", callback_data="owner_panel")],
+            ])
+            await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=keyboard)
+            return
         if action in {"warn", "mute", "unmute"}:
             if message.chat.type == "private":
                 await message.answer(

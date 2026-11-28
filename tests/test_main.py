@@ -20,6 +20,7 @@ from main import (
     panel_people,
     panel_member_history,
     build_main_keyboard,
+    build_owner_keyboard,
     build_section_keyboard,
     build_player_message,
     build_profile_message,
@@ -140,6 +141,15 @@ class ProfileFormattingTests(unittest.TestCase):
         self.assertIn("owner:settings", callbacks)
         self.assertIn("owner:modlog", callbacks)
         self.assertIn("menu:home", callbacks)
+
+    def test_owner_keyboard_exposes_vip_shop(self):
+        callbacks = {
+            button.callback_data
+            for row in build_owner_keyboard().inline_keyboard
+            for button in row
+            if button.callback_data
+        }
+        self.assertIn("owner:vip", callbacks)
 
     def test_main_keyboard_is_moderation_first_and_owner_panel_is_private(self):
         public_keyboard = build_main_keyboard("https://forum.example/")
