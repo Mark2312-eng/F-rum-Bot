@@ -33,6 +33,7 @@ from privacy_broadcast import ensure_privacy_schema, has_consent, has_subscripti
 from vip_stars import TIERS, ensure_vip_schema, register_vip_handlers, tier_price
 from vip_admin import ensure_vip_admin_schema, register_vip_admin_handlers
 from community_events import ensure_events_schema, register_events_poll_handlers
+from community_rewards import ensure_community_rewards_schema, register_community_rewards_handlers
 from staff_role_catalog import DEPARTMENT_TITLES, ROLE_CATALOG
 from system_roles import ROLES as SYSTEM_ROLE_DEFINITIONS
 
@@ -1784,6 +1785,7 @@ def create_dispatcher() -> Dispatcher:
     register_vip_handlers(dispatcher)
     register_vip_admin_handlers(dispatcher)
     register_events_poll_handlers(dispatcher)
+    register_community_rewards_handlers(dispatcher)
     dispatcher.message.register(cmd_start, Command("start"))
     dispatcher.message.register(cmd_help, Command("help"))
     dispatcher.message.register(cmd_profile, Command("profile"))
@@ -1913,6 +1915,7 @@ async def main() -> None:
         await ensure_vip_schema()
         await ensure_vip_admin_schema()
         await ensure_events_schema()
+        await ensure_community_rewards_schema()
         await ensure_support_schema()
         LOGGER.info("PostgreSQL connection established; support schema ready")
         runner = await start_web_server(port, bot)
@@ -1935,6 +1938,15 @@ async def main() -> None:
             BotCommand(command="events", description="Список мероприятий и запись"),
             BotCommand(command="pollcreate", description="Создать голосование (владелец)"),
             BotCommand(command="polls", description="Список голосований"),
+            BotCommand(command="contestcreate", description="Создать бесплатный конкурс (владелец)"),
+            BotCommand(command="contests", description="Список конкурсов"),
+            BotCommand(command="contestdraw", description="Подвести итоги конкурса (владелец)"),
+            BotCommand(command="promocreate", description="Создать промокод (владелец)"),
+            BotCommand(command="promo", description="Активировать промокод"),
+            BotCommand(command="daily", description="Ежедневная награда"),
+            BotCommand(command="points", description="Баланс баллов"),
+            BotCommand(command="leaderboard", description="Рейтинг сообщества"),
+            BotCommand(command="achievements", description="Мои достижения"),
             BotCommand(command="help", description="Список команд"),
             BotCommand(command="profile", description="Профиль форума"),
             BotCommand(command="punish", description="Проверить наказание"),
