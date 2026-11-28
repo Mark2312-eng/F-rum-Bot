@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from database import database
 from moderation import ban_member, clear_warnings, kick_member, moderate_message, mute_member, owner_summary, purge_messages, register_group, show_ban_info, show_ban_list, show_moderation_log, show_moderation_stats, show_warning_history, show_warning_list, show_warnings, unban_member, unmute_member, warn_member
 from group_settings import apply_setting_callback, show_group_settings
+from raid_protection import handle_new_members
 from advanced_moderation import blacklist_command, nickname_command, report_command, reportclose_command, reports_command, role_command
 from system_roles import staff_command, myrole_command, staffinfo_command, setrole_command, staffremove_command, stafflog_command, rolehelp_command, syshealth_command, reporthelp_command, has_permission
 from testing import create_test_command, add_question_command, send_test_command, test_results_command, handle_test_start, test_answer_callback
@@ -1515,6 +1516,10 @@ async def group_modlog_handler(message: Message, bot: Bot) -> None:
         await show_moderation_log(message, bot, owner_id)
 
 
+async def group_join_handler(message: Message, bot: Bot) -> None:
+    await handle_new_members(message, bot)
+
+
 async def group_moderation_handler(message: Message, bot: Bot) -> None:
     owner_id = int(os.getenv("OWNER_TELEGRAM_ID", "0") or "0")
     if owner_id > 0:
@@ -1886,6 +1891,7 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.message.register(chat_removerole_handler, lambda message: bool(message.text and message.text.startswith("-role ")))
     dispatcher.callback_query.register(test_answer_callback, F.data.startswith("testq:"))
     dispatcher.message.register(button_input_handler, lambda message: bool(message.from_user and has_pending_input(message.chat.id, message.from_user.id)))
+    dispatcher.message.register(group_join_handler, F.new_chat_members)
     dispatcher.message.register(group_moderation_handler)
     dispatcher.callback_query.register(cmd_menu_callback, F.data == "owner_panel")
     dispatcher.callback_query.register(cmd_menu_callback, F.data.startswith("menu:"))
