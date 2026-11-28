@@ -31,6 +31,7 @@ from group_info import admins_command, chatinfo_command, rules_command, setrules
 from support_system import ensure_support_schema, register_support_routes, register_support_bot
 from privacy_broadcast import ensure_privacy_schema, has_consent, has_subscription_choice, show_consent_prompt, show_subscription_prompt, register_privacy_broadcast_handlers
 from vip_stars import TIERS, ensure_vip_schema, register_vip_handlers, tier_price
+from vip_admin import ensure_vip_admin_schema, register_vip_admin_handlers
 from community_events import ensure_events_schema, register_events_poll_handlers
 from staff_role_catalog import DEPARTMENT_TITLES, ROLE_CATALOG
 from system_roles import ROLES as SYSTEM_ROLE_DEFINITIONS
@@ -1296,6 +1297,8 @@ async def cmd_menu_callback(callback: CallbackQuery) -> None:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="👥 Активные VIP", callback_data="owner:vip:buyers")],
                 [InlineKeyboardButton(text="🧾 История платежей", callback_data="owner:vip:sales")],
+                [InlineKeyboardButton(text="➕ Выдать / продлить VIP", callback_data="owner:vipadmin:grant")],
+                [InlineKeyboardButton(text="➖ Снять VIP", callback_data="owner:vipadmin:revoke")],
                 [InlineKeyboardButton(text="🔄 Обновить", callback_data="owner:vip")],
                 [InlineKeyboardButton(text="⬅️ Панель владельца", callback_data="owner_panel")],
             ])
@@ -1778,6 +1781,7 @@ def create_dispatcher() -> Dispatcher:
     register_support_bot(dispatcher)
     register_privacy_broadcast_handlers(dispatcher)
     register_vip_handlers(dispatcher)
+    register_vip_admin_handlers(dispatcher)
     register_events_poll_handlers(dispatcher)
     dispatcher.message.register(cmd_start, Command("start"))
     dispatcher.message.register(cmd_help, Command("help"))
