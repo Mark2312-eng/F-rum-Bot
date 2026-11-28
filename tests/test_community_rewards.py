@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timezone
-from community_rewards import normalize_promo_code, parse_contest_input
+from community_rewards import contest_card, normalize_promo_code, parse_contest_input
 
 
 class CommunityRewardsParsingTests(unittest.TestCase):
@@ -24,6 +24,15 @@ class CommunityRewardsParsingTests(unittest.TestCase):
     def test_contest_rejects_invalid_winner_count(self):
         with self.assertRaisesRegex(ValueError, "от 1 до 50"):
             parse_contest_input("Конкурс | 2027-12-20T18:00+00:00 | 0 | Приз")
+
+    def test_contest_card_contains_giveaway_details(self):
+        deadline = datetime(2027, 12, 20, 18, 0, tzinfo=timezone.utc)
+        card = contest_card("Зимний конкурс", "VIP Gold", deadline, 3, 42, 17)
+        self.assertIn("F-RUM GIVEAWAY", card)
+        self.assertIn("Зимний конкурс", card)
+        self.assertIn("VIP Gold", card)
+        self.assertIn("42", card)
+        self.assertIn("Конкурс #17", card)
 
     def test_promo_code_is_normalized(self):
         self.assertEqual(normalize_promo_code("  winter_2026 "), "WINTER_2026")

@@ -9,7 +9,7 @@ from aiogram import Dispatcher, F
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from database import database
-from community_rewards import normalize_promo_code, parse_contest_input
+from community_rewards import contest_card, contest_keyboard, normalize_promo_code, parse_contest_input
 
 _PENDING: dict[int, str] = {}
 
@@ -47,11 +47,10 @@ async def _show_contests(message: Message) -> None:
     await message.answer("🎉 <b>Последние конкурсы</b>", parse_mode="HTML")
     for row in rows:
         status = "🟢 Регистрация открыта" if row["status"] == "open" and row["ends_at"] > datetime.now(timezone.utc) else ("🏁 Итоги подведены" if row["status"] == "drawn" else "⌛ Срок регистрации истёк")
-        body = (
-            f"<b>#{row['id']} · {escape(row['title'])}</b>\n🎁 {escape(row['prize'])}\n"
-            f"👥 Участников: {row['entries']} · Победителей: {row['winner_count']}\n"
-            f"🗨 Чат: <code>{row['chat_id']}</code>\n⏰ {row['ends_at'].isoformat()}\n{status}"
-        )
+        body = contest_card(
+            row["title"], row["prize"], row["ends_at"], int(row["winner_count"]),
+            int(row["entries"]), int(row["id"]),
+        ) + f"\n\n<b>Статус:</b> {status}"
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="Закрыть конкурс", callback_data=f"owner:community:cancel:{row['id']}")
         ]]) if row["status"] == "open" else None
@@ -142,13 +141,10 @@ async def _pending_message(message: Message) -> None:
                     INSERT INTO community_contests (chat_id,created_by,title,prize,ends_at,winner_count)
                     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id
                 """, chat_id, message.from_user.id, title, prize, ends_at, winners)
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="🎉 Участвовать", callback_data=f"contest:join:{contest_id}")
-            ]])
+            keyboard = contest_keyboard(contest_id)
             await message.bot.send_message(
                 chat_id,
-                f"🎉 <b>КОНКУРС #{contest_id}</b>\n\n<b>{escape(title)}</b>\n🎁 Приз: {escape(prize)}\n"
-                f"🏆 Победителей: {winners}\n⏰ Завершение: {ends_at.isoformat()}\n\nУчастие бесплатное.",
+                contest_card(title, prize, ends_at, winners, 0, contest_id),
                 parse_mode="HTML", reply_markup=keyboard,
             )
             await message.answer(f"✅ Конкурс #{contest_id} создан и опубликован.", reply_markup=_menu())

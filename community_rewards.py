@@ -42,6 +42,35 @@ def parse_contest_input(raw: str):
     return parts[0], ends_at, winners, parts[3]
 
 
+def contest_card(title: str, prize: str, ends_at, winners: int, entries: int, contest_id: int) -> str:
+    """Render a polished Telegram-native giveaway card."""
+    deadline = ends_at.strftime("%d.%m.%Y · %H:%M UTC%z")
+    return (
+        "╭━━━━━━━━━━━━━━━━━━╮\n"
+        "       🎉 <b>F-RUM GIVEAWAY</b>       \n"
+        "╰━━━━━━━━━━━━━━━━━━╯\n\n"
+        f"<b>{escape(title)}</b>\n\n"
+        "🎁 <b>ПРИЗ</b>\n"
+        f"{escape(prize)}\n\n"
+        "🏆 <b>ПОБЕДИТЕЛИ</b>\n"
+        f"{winners}\n\n"
+        "👥 <b>УЧАСТНИКИ</b>\n"
+        f"{entries}\n\n"
+        "⏳ <b>ОКОНЧАНИЕ</b>\n"
+        f"{deadline}\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "Участие бесплатное. Один аккаунт — одна заявка.\n"
+        "Победители выбираются случайным образом.\n"
+        f"<i>Конкурс #{contest_id} · F-rum Bot</i>"
+    )
+
+
+def contest_keyboard(contest_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🎉 УЧАСТВОВАТЬ", callback_data=f"contest:join:{contest_id}")
+    ]])
+
+
 def normalize_promo_code(raw: str) -> str:
     code = raw.strip().upper()
     if not 3 <= len(code) <= 32 or not code.replace("_", "").replace("-", "").isalnum():
@@ -184,15 +213,9 @@ async def create_contest_command(message: Message) -> None:
                 (chat_id, created_by, title, prize, ends_at, winner_count)
             VALUES ($1,$2,$3,$4,$5,$6) RETURNING id
         """, message.chat.id, message.from_user.id, title, prize, ends_at, winners)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🎉 Участвовать", callback_data=f"contest:join:{contest_id}")
-    ]])
     await message.answer(
-        f"🎉 <b>КОНКУРС #{contest_id}</b>\n\n"
-        f"<b>{escape(title)}</b>\n🎁 Приз: {escape(prize)}\n"
-        f"🏆 Победителей: {winners}\n⏰ Завершение: {ends_at.isoformat()}\n\n"
-        "Участие бесплатное. Победители будут выбраны случайно из списка участников.",
-        parse_mode="HTML", reply_markup=keyboard,
+        contest_card(title, prize, ends_at, winners, 0, contest_id),
+        parse_mode="HTML", reply_markup=contest_keyboard(contest_id),
     )
 
 
@@ -213,14 +236,12 @@ async def list_contests_command(message: Message) -> None:
         state = "идёт" if row["status"] == "open" else "завершён"
         keyboard = None
         if row["status"] == "open" and row["ends_at"] > datetime.now(timezone.utc):
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text="🎉 Участвовать", callback_data=f"contest:join:{row['id']}")
-            ]])
+            keyboard = contest_keyboard(int(row["id"]))
         await message.answer(
-            f"🎉 <b>#{row['id']} · {escape(row['title'])}</b>\n"
-            f"🎁 {escape(row['prize'])}\n👥 Участников: {row['entries']}\n"
-            f"🏆 Победителей: {row['winner_count']}\n⏰ {row['ends_at'].isoformat()}\n"
-            f"Статус: {state}", parse_mode="HTML", reply_markup=keyboard,
+            contest_card(row["title"], row["prize"], row["ends_at"],
+                         int(row["winner_count"]), int(row["entries"]), int(row["id"]))
+            + f"\n\n<b>Статус:</b> {state.upper()}",
+            parse_mode="HTML", reply_markup=keyboard,
         )
 
 
@@ -241,12 +262,30 @@ async def contest_join_callback(callback: CallbackQuery) -> None:
             if not contest or contest["status"] != "open" or contest["ends_at"] <= datetime.now(timezone.utc):
                 await callback.answer("Регистрация на этот конкурс завершена.", show_alert=True)
                 return
-            await conn.execute("""
+            inserted = await conn.fetchval("""
                 INSERT INTO community_contest_entries (contest_id,user_id,display_name)
-                VALUES ($1,$2,$3) ON CONFLICT (contest_id,user_id)
-                DO UPDATE SET display_name=EXCLUDED.display_name
+                VALUES ($1,$2,$3) ON CONFLICT (contest_id,user_id) DO NOTHING
+                RETURNING user_id
             """, contest_id, callback.from_user.id, callback.from_user.full_name[:100])
-    await callback.answer("Вы участвуете в конкурсе.")
+            entries = await conn.fetchval(
+                "SELECT COUNT(*) FROM community_contest_entries WHERE contest_id=$1", contest_id
+            )
+            contest = await conn.fetchrow(
+                "SELECT title,prize,ends_at,winner_count FROM community_contests WHERE id=$1",
+                contest_id,
+            )
+    await callback.answer(
+        "Вы зарегистрированы в конкурсе." if inserted else "Вы уже участвуете в этом конкурсе."
+    )
+    if callback.message and contest:
+        try:
+            await callback.message.edit_text(
+                contest_card(contest["title"], contest["prize"], contest["ends_at"],
+                             int(contest["winner_count"]), int(entries), contest_id),
+                parse_mode="HTML", reply_markup=contest_keyboard(contest_id),
+            )
+        except Exception:
+            pass
 
 
 async def draw_contest_command(message: Message) -> None:
