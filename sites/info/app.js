@@ -314,3 +314,34 @@
   });
 
 })();
+
+
+/* Progressive motion enhancements: no effect on support/auth flows. */
+(() => {
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const header = document.querySelector('.site-header');
+  const progress = document.getElementById('scrollProgress');
+  const updateScroll = () => {
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    if (progress) progress.style.width = (max > 0 ? window.scrollY / max * 100 : 0) + '%';
+    if (header) header.classList.toggle('is-scrolled', window.scrollY > 12);
+  };
+  updateScroll();
+  window.addEventListener('scroll', updateScroll, { passive: true });
+  if (reduceMotion || !('IntersectionObserver' in window)) return;
+  const targets = document.querySelectorAll(
+    '.section-heading,.feature-card,.workflow-inner,.steps article,.team-role-card,.team-process,.command-list,.support-shell,.closing-cta'
+  );
+  const observer = new IntersectionObserver((entries, current) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add('is-visible');
+      current.unobserve(entry.target);
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -35px 0px' });
+  targets.forEach((element, index) => {
+    element.classList.add('reveal-motion');
+    if (element.matches('.feature-card,.team-role-card')) element.style.transitionDelay = Math.min(index % 5, 4) * 55 + 'ms';
+    observer.observe(element);
+  });
+})();

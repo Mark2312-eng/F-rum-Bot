@@ -163,3 +163,25 @@ tbody tr:hover{background:#18251d}
 @media(max-width:600px){.member-history-filters{grid-template-columns:1fr}.member-history-filters .button{width:100%}}
 
 .staff-admin-controls{display:grid;grid-template-columns:minmax(180px,.7fr) minmax(240px,1.3fr) auto;gap:12px;align-items:end;margin:18px 0;padding:16px;background:#0e1713;border:1px solid #26372d;border-radius:12px}.staff-admin-controls input,.staff-admin-controls select{display:block;width:100%;margin-top:7px;padding:11px 12px;background:#0a110e;border:1px solid #34463a;border-radius:8px;color:var(--text);font:inherit}.staff-admin-controls .button{min-height:40px}.staff-admin-controls[hidden]{display:none}@media(max-width:700px){.staff-admin-controls{grid-template-columns:1fr}.staff-admin-controls .button{width:100%}}
+
+
+/* Dashboard motion refresh — subtle and keyboard/reduced-motion friendly */
+@media (prefers-reduced-motion:no-preference){
+  .topbar{animation:panel-enter .55s cubic-bezier(.2,.75,.25,1) both}
+  .login-copy{animation:panel-enter .65s .08s cubic-bezier(.2,.75,.25,1) both}
+  .auth-card{animation:panel-enter .7s .16s cubic-bezier(.2,.75,.25,1) both;transition:transform .35s,border-color .35s,box-shadow .35s}
+  .auth-card:hover{transform:translateY(-3px);border-color:#526e48;box-shadow:0 30px 90px #0007}
+  .stats article,.block{opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s cubic-bezier(.2,.75,.25,1),border-color .25s,box-shadow .25s}
+  .stats article.motion-visible,.block.motion-visible{opacity:1;transform:translateY(0)}
+  .stats article:hover{border-color:#536d48;box-shadow:0 14px 34px #0004}
+  .block:hover{border-color:#394d3e}
+  .dash-nav a{transition:color .2s,background .2s,border-color .2s,transform .2s}
+  .dash-nav a:hover{transform:translateY(-1px)}
+  .button{transition:transform .2s,background .2s,border-color .2s,box-shadow .2s}
+  .button:hover:not(:disabled){transform:translateY(-2px)}
+  .table-wrap tbody tr{transition:background .18s}
+}
+@keyframes panel-enter{from{opacity:0;transform:translateY(15px)}to{opacity:1;transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){
+  .stats article,.block{opacity:1!important;transform:none!important;transition:none!important}
+}
