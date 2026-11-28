@@ -171,8 +171,9 @@ tbody tr:hover{background:#18251d}
   .login-copy{animation:panel-enter .65s .08s cubic-bezier(.2,.75,.25,1) both}
   .auth-card{animation:panel-enter .7s .16s cubic-bezier(.2,.75,.25,1) both;transition:transform .35s,border-color .35s,box-shadow .35s}
   .auth-card:hover{transform:translateY(-3px);border-color:#526e48;box-shadow:0 30px 90px #0007}
-  .stats article,.block{opacity:0;transform:translateY(14px);transition:opacity .5s ease,transform .5s cubic-bezier(.2,.75,.25,1),border-color .25s,box-shadow .25s}
-  .stats article.motion-visible,.block.motion-visible{opacity:1;transform:translateY(0)}
+  /* Keep dashboard content visible if data arrives after the first reveal pass. */
+  .stats article,.block{opacity:1;transform:none;transition:opacity .5s ease,transform .5s cubic-bezier(.2,.75,.25,1),border-color .25s,box-shadow .25s}
+  .stats article.motion-visible,.block.motion-visible{animation:panel-enter .5s cubic-bezier(.2,.75,.25,1) both}
   .stats article:hover{border-color:#536d48;box-shadow:0 14px 34px #0004}
   .block:hover{border-color:#394d3e}
   .dash-nav a{transition:color .2s,background .2s,border-color .2s,transform .2s}
