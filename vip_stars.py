@@ -252,6 +252,11 @@ async def _active_membership(user_id: int):
     )
 
 
+async def active_vip_membership(user_id: int):
+    """Return the user's active VIP tier and expiry for profile/stat displays."""
+    return await _active_membership(user_id)
+
+
 async def _send_invoice(bot: Bot, chat_id: int, user_id: int, tier: str) -> None:
     amount = tier_price(tier)
     if amount is None:

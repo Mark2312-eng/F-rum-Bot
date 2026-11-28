@@ -34,6 +34,18 @@ class UserStatsFormattingTests(unittest.TestCase):
         self.assertIn("name&amp;tag", text)
         self.assertIn("ID: <code>123456</code>", text)
 
+    def test_displays_active_vip_tier_and_expiry(self):
+        user = SimpleNamespace(id=77, full_name="VIP User", username="vipuser")
+        expiry = datetime(2026, 12, 28, 15, 30, tzinfo=timezone.utc)
+        text = build_user_stats_message(
+            user,
+            {},
+            "Пользователь",
+            blocked=False,
+            vip_membership={"tier": "diamond", "expires_at": expiry},
+        )
+        self.assertIn("VIP статус: 💎 VIP Diamond до 28.12.2026 15:30", text)
+
     def test_marks_first_observed_message_and_missing_optional_data(self):
         user = SimpleNamespace(id=42, full_name="User", username=None)
         text = build_user_stats_message(
@@ -43,7 +55,7 @@ class UserStatsFormattingTests(unittest.TestCase):
             blocked=False,
         )
         self.assertIn("Впервые замечен ботом: нет данных", text)
-        self.assertIn("VIP статус: нет данных", text)
+        self.assertIn("VIP статус: нет", text)
         self.assertIn("Пригласил(а): —", text)
         self.assertIn("Username: не указан", text)
         self.assertIn("Сообщений отправлено: 0", text)
